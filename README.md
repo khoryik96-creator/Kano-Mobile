@@ -21,9 +21,16 @@ src/core/notes/     pure TypeScript, no React Native — runs in Node
   normalize.ts      record + tombstone + cloud-payload normalization
   merge.ts          sort · resolve · commit-merge · mergeNoteState (the sync merge)
   index.ts          public surface
+src/core/sync/      Google Drive REST layer — transport injected, runs in Node & RN
+  payload.ts        buildCloudPayload · driveMultipartBody · driveEscapeQueryValue
+  driveClient.ts    find · download (+ETag) · multipart upload (create/PATCH + If-Match)
+  syncNotes.ts      pushNotes · retrieveNotes · inspectCloud — drives mergeNoteState
+  types.ts          FetchLike / TokenProvider injection points
+  index.ts          public surface
 test/
   fixtures/         contract corpus vendored from Kano/mobile/contract (ground truth)
   contract.test.ts  proves the core reproduces the extension's outputs exactly
+  sync.test.ts      in-memory fake Drive (ETag/If-Match/412) drives the real merge
 ```
 
 ## Develop
@@ -49,8 +56,12 @@ one-character change to the merge rule fails the suite.
 ## Roadmap
 
 - [x] **Phase 2a** — notes core in TS, all contract fixtures green in Node.
-- [ ] **Phase 2b** — `core/sync`: Google Drive REST (find · read · multipart write ·
-      `If-Match` 412-retry) driving `mergeNoteState`; live round-trip with the extension.
+- [~] **Phase 2b** — `core/sync`: Google Drive REST (find · read · multipart write ·
+      `If-Match` 412-retry) driving `mergeNoteState`. **Code complete and offline-verified**
+      — a fake Drive reproducing Google's ETag/412 semantics proves create, PATCH-update,
+      conflict-retry convergence, and cross-client round-trip against the real merge.
+      Remaining: the **live round-trip** against the extension's real Drive file, which
+      needs real Google OAuth credentials on a device (the on-hardware half of this phase).
 - [ ] **Phase 3** — `core/owl` + `core/ai`: prompt building, markdown model, and the
       Anthropic/DeepSeek calls (native `fetch`, no CORS).
 - [ ] **Phase 4** — React Native UI (Notes list/editor, Owl chat, settings).
