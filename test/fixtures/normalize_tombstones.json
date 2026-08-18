@@ -1,0 +1,71 @@
+{
+  "suite": "normalize_tombstones",
+  "fn": "kanoNormalizeNoteTombstones",
+  "argOrder": [
+    "list"
+  ],
+  "frozenNow": "2026-08-16T00:00:00.000Z",
+  "contractNoteFields": [
+    "id",
+    "title",
+    "text",
+    "createdAt",
+    "updatedAt",
+    "archived",
+    "archivedAt"
+  ],
+  "generatedFrom": "modules/kano_notes.js",
+  "cases": [
+    {
+      "name": "dedupe by id keeping the newest deletedAt, sorted descending",
+      "input": {
+        "list": [
+          {
+            "id": "a",
+            "deletedAt": "2026-06-01T00:00:00.000Z"
+          },
+          {
+            "id": "a",
+            "deletedAt": "2026-08-01T00:00:00.000Z"
+          },
+          {
+            "id": "b",
+            "deletedAt": "2026-07-01T00:00:00.000Z"
+          }
+        ]
+      },
+      "expected": [
+        {
+          "id": "a",
+          "deletedAt": "2026-08-01T00:00:00.000Z"
+        },
+        {
+          "id": "b",
+          "deletedAt": "2026-07-01T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "tombstones older than 90 days are dropped",
+      "doc": "retention 90d relative to frozen now 2026-08-16; cutoff ~2026-05-18",
+      "input": {
+        "list": [
+          {
+            "id": "old",
+            "deletedAt": "2026-01-01T00:00:00.000Z"
+          },
+          {
+            "id": "fresh",
+            "deletedAt": "2026-08-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "expected": [
+        {
+          "id": "fresh",
+          "deletedAt": "2026-08-10T00:00:00.000Z"
+        }
+      ]
+    }
+  ]
+}

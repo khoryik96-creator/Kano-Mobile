@@ -1,0 +1,96 @@
+{
+  "suite": "sort_notes",
+  "fn": "kanoSortNotes",
+  "argOrder": [
+    "notes"
+  ],
+  "frozenNow": "2026-08-16T00:00:00.000Z",
+  "contractNoteFields": [
+    "id",
+    "title",
+    "text",
+    "createdAt",
+    "updatedAt",
+    "archived",
+    "archivedAt"
+  ],
+  "generatedFrom": "modules/kano_notes.js",
+  "cases": [
+    {
+      "name": "newest updatedAt first; records without id dropped",
+      "input": {
+        "notes": [
+          {
+            "id": "a",
+            "title": "a",
+            "text": "a body",
+            "html": "",
+            "createdAt": "2026-03-01T00:00:00.000Z",
+            "updatedAt": "2026-03-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          },
+          {
+            "id": "b",
+            "title": "b",
+            "text": "b body",
+            "html": "",
+            "createdAt": "2026-05-01T00:00:00.000Z",
+            "updatedAt": "2026-05-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          },
+          {
+            "id": "",
+            "title": "",
+            "text": " body",
+            "html": "",
+            "createdAt": "2026-09-01T00:00:00.000Z",
+            "updatedAt": "2026-09-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          },
+          {
+            "id": "c",
+            "title": "c",
+            "text": "c body",
+            "html": "",
+            "createdAt": "2026-04-01T00:00:00.000Z",
+            "updatedAt": "2026-04-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ]
+      },
+      "expected": [
+        {
+          "id": "b",
+          "title": "b",
+          "text": "b body",
+          "createdAt": "2026-05-01T00:00:00.000Z",
+          "updatedAt": "2026-05-01T00:00:00.000Z",
+          "archived": false,
+          "archivedAt": ""
+        },
+        {
+          "id": "c",
+          "title": "c",
+          "text": "c body",
+          "createdAt": "2026-04-01T00:00:00.000Z",
+          "updatedAt": "2026-04-01T00:00:00.000Z",
+          "archived": false,
+          "archivedAt": ""
+        },
+        {
+          "id": "a",
+          "title": "a",
+          "text": "a body",
+          "createdAt": "2026-03-01T00:00:00.000Z",
+          "updatedAt": "2026-03-01T00:00:00.000Z",
+          "archived": false,
+          "archivedAt": ""
+        }
+      ]
+    }
+  ]
+}

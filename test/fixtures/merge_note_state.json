@@ -1,0 +1,590 @@
+{
+  "suite": "merge_note_state",
+  "fn": "kanoMergeNoteState",
+  "argOrder": [
+    "localNotes",
+    "remotePayload",
+    "localTombstones"
+  ],
+  "frozenNow": "2026-08-16T00:00:00.000Z",
+  "contractNoteFields": [
+    "id",
+    "title",
+    "text",
+    "createdAt",
+    "updatedAt",
+    "archived",
+    "archivedAt"
+  ],
+  "generatedFrom": "modules/kano_notes.js",
+  "cases": [
+    {
+      "name": "disjoint local and remote notes union",
+      "input": {
+        "localNotes": [
+          {
+            "id": "a",
+            "title": "a",
+            "text": "a body",
+            "html": "",
+            "createdAt": "2026-05-01T00:00:00.000Z",
+            "updatedAt": "2026-05-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "remotePayload": {
+          "notes": [
+            {
+              "id": "b",
+              "title": "b",
+              "text": "b body",
+              "html": "",
+              "createdAt": "2026-05-02T00:00:00.000Z",
+              "updatedAt": "2026-05-02T00:00:00.000Z",
+              "archived": false,
+              "archivedAt": ""
+            }
+          ]
+        },
+        "localTombstones": []
+      },
+      "expected": {
+        "notes": [
+          {
+            "id": "b",
+            "title": "b",
+            "text": "b body",
+            "createdAt": "2026-05-02T00:00:00.000Z",
+            "updatedAt": "2026-05-02T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          },
+          {
+            "id": "a",
+            "title": "a",
+            "text": "a body",
+            "createdAt": "2026-05-01T00:00:00.000Z",
+            "updatedAt": "2026-05-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "tombstones": []
+      }
+    },
+    {
+      "name": "same id: remote newer wins",
+      "input": {
+        "localNotes": [
+          {
+            "id": "a",
+            "title": "local",
+            "text": "local body",
+            "html": "",
+            "createdAt": "2026-05-01T00:00:00.000Z",
+            "updatedAt": "2026-05-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "remotePayload": {
+          "notes": [
+            {
+              "id": "a",
+              "title": "remote",
+              "text": "remote body",
+              "html": "",
+              "createdAt": "2026-06-01T00:00:00.000Z",
+              "updatedAt": "2026-06-01T00:00:00.000Z",
+              "archived": false,
+              "archivedAt": ""
+            }
+          ]
+        },
+        "localTombstones": []
+      },
+      "expected": {
+        "notes": [
+          {
+            "id": "a",
+            "title": "remote",
+            "text": "remote body",
+            "createdAt": "2026-06-01T00:00:00.000Z",
+            "updatedAt": "2026-06-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "tombstones": []
+      }
+    },
+    {
+      "name": "same id: local newer wins",
+      "input": {
+        "localNotes": [
+          {
+            "id": "a",
+            "title": "local",
+            "text": "local body",
+            "html": "",
+            "createdAt": "2026-06-01T00:00:00.000Z",
+            "updatedAt": "2026-06-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "remotePayload": {
+          "notes": [
+            {
+              "id": "a",
+              "title": "remote",
+              "text": "remote body",
+              "html": "",
+              "createdAt": "2026-05-01T00:00:00.000Z",
+              "updatedAt": "2026-05-01T00:00:00.000Z",
+              "archived": false,
+              "archivedAt": ""
+            }
+          ]
+        },
+        "localTombstones": []
+      },
+      "expected": {
+        "notes": [
+          {
+            "id": "a",
+            "title": "local",
+            "text": "local body",
+            "createdAt": "2026-06-01T00:00:00.000Z",
+            "updatedAt": "2026-06-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "tombstones": []
+      }
+    },
+    {
+      "name": "same id, equal updatedAt: local is kept (tie to local)",
+      "doc": "merge keeps the record seen last on a >= tie; local is iterated after remote",
+      "input": {
+        "localNotes": [
+          {
+            "id": "a",
+            "title": "local",
+            "text": "local body",
+            "html": "",
+            "createdAt": "2026-06-01T00:00:00.000Z",
+            "updatedAt": "2026-06-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "remotePayload": {
+          "notes": [
+            {
+              "id": "a",
+              "title": "remote",
+              "text": "remote body",
+              "html": "",
+              "createdAt": "2026-06-01T00:00:00.000Z",
+              "updatedAt": "2026-06-01T00:00:00.000Z",
+              "archived": false,
+              "archivedAt": ""
+            }
+          ]
+        },
+        "localTombstones": []
+      },
+      "expected": {
+        "notes": [
+          {
+            "id": "a",
+            "title": "local",
+            "text": "local body",
+            "createdAt": "2026-06-01T00:00:00.000Z",
+            "updatedAt": "2026-06-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "tombstones": []
+      }
+    },
+    {
+      "name": "remote tombstone newer than local note deletes it",
+      "input": {
+        "localNotes": [
+          {
+            "id": "a",
+            "title": "a",
+            "text": "a body",
+            "html": "",
+            "createdAt": "2026-05-01T00:00:00.000Z",
+            "updatedAt": "2026-05-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "remotePayload": {
+          "notes": [],
+          "tombstones": [
+            {
+              "id": "a",
+              "deletedAt": "2026-06-01T00:00:00.000Z"
+            }
+          ]
+        },
+        "localTombstones": []
+      },
+      "expected": {
+        "notes": [],
+        "tombstones": [
+          {
+            "id": "a",
+            "deletedAt": "2026-06-01T00:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "local note strictly newer than remote tombstone revives it",
+      "doc": "tombstone dropped; note survives",
+      "input": {
+        "localNotes": [
+          {
+            "id": "a",
+            "title": "a",
+            "text": "a body",
+            "html": "",
+            "createdAt": "2026-07-01T00:00:00.000Z",
+            "updatedAt": "2026-07-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "remotePayload": {
+          "notes": [],
+          "tombstones": [
+            {
+              "id": "a",
+              "deletedAt": "2026-06-01T00:00:00.000Z"
+            }
+          ]
+        },
+        "localTombstones": []
+      },
+      "expected": {
+        "notes": [
+          {
+            "id": "a",
+            "title": "a",
+            "text": "a body",
+            "createdAt": "2026-07-01T00:00:00.000Z",
+            "updatedAt": "2026-07-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "tombstones": []
+      }
+    },
+    {
+      "name": "tombstone deletedAt equal to note updatedAt keeps it deleted",
+      "doc": "deletedMs >= noteMs => deleted",
+      "input": {
+        "localNotes": [
+          {
+            "id": "a",
+            "title": "a",
+            "text": "a body",
+            "html": "",
+            "createdAt": "2026-06-01T00:00:00.000Z",
+            "updatedAt": "2026-06-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "remotePayload": {
+          "notes": [],
+          "tombstones": [
+            {
+              "id": "a",
+              "deletedAt": "2026-06-01T00:00:00.000Z"
+            }
+          ]
+        },
+        "localTombstones": []
+      },
+      "expected": {
+        "notes": [],
+        "tombstones": [
+          {
+            "id": "a",
+            "deletedAt": "2026-06-01T00:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a note with no id is assigned the stable hash",
+      "input": {
+        "localNotes": [
+          {
+            "id": "",
+            "title": "Hashme",
+            "text": "no id here",
+            "html": "",
+            "createdAt": "2026-05-01T00:00:00.000Z",
+            "updatedAt": "2026-05-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "remotePayload": {
+          "notes": []
+        },
+        "localTombstones": []
+      },
+      "expected": {
+        "notes": [
+          {
+            "id": "note_1rjsrxr",
+            "title": "Hashme",
+            "text": "no id here",
+            "createdAt": "2026-05-01T00:00:00.000Z",
+            "updatedAt": "2026-05-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "tombstones": []
+      }
+    },
+    {
+      "name": "an expired remote tombstone (>90 days) is dropped from the result",
+      "input": {
+        "localNotes": [
+          {
+            "id": "keep",
+            "title": "keep",
+            "text": "keep body",
+            "html": "",
+            "createdAt": "2026-08-10T00:00:00.000Z",
+            "updatedAt": "2026-08-10T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "remotePayload": {
+          "notes": [],
+          "tombstones": [
+            {
+              "id": "gone",
+              "deletedAt": "2026-01-01T00:00:00.000Z"
+            }
+          ]
+        },
+        "localTombstones": []
+      },
+      "expected": {
+        "notes": [
+          {
+            "id": "keep",
+            "title": "keep",
+            "text": "keep body",
+            "createdAt": "2026-08-10T00:00:00.000Z",
+            "updatedAt": "2026-08-10T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "tombstones": []
+      }
+    },
+    {
+      "name": "remote payload as a bare array is accepted",
+      "input": {
+        "localNotes": [
+          {
+            "id": "a",
+            "title": "a",
+            "text": "a body",
+            "html": "",
+            "createdAt": "2026-05-01T00:00:00.000Z",
+            "updatedAt": "2026-05-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "remotePayload": [
+          {
+            "id": "b",
+            "title": "b",
+            "text": "b body",
+            "html": "",
+            "createdAt": "2026-06-01T00:00:00.000Z",
+            "updatedAt": "2026-06-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "localTombstones": []
+      },
+      "expected": {
+        "notes": [
+          {
+            "id": "b",
+            "title": "b",
+            "text": "b body",
+            "createdAt": "2026-06-01T00:00:00.000Z",
+            "updatedAt": "2026-06-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          },
+          {
+            "id": "a",
+            "title": "a",
+            "text": "a body",
+            "createdAt": "2026-05-01T00:00:00.000Z",
+            "updatedAt": "2026-05-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "tombstones": []
+      }
+    },
+    {
+      "name": "remote payload as activeNotes/archivedNotes is accepted",
+      "input": {
+        "localNotes": [],
+        "remotePayload": {
+          "activeNotes": [
+            {
+              "id": "a",
+              "title": "a",
+              "text": "a body",
+              "html": "",
+              "createdAt": "2026-05-01T00:00:00.000Z",
+              "updatedAt": "2026-05-01T00:00:00.000Z",
+              "archived": false,
+              "archivedAt": ""
+            }
+          ],
+          "archivedNotes": [
+            {
+              "id": "z",
+              "title": "z",
+              "text": "z body",
+              "html": "",
+              "createdAt": "2026-04-01T00:00:00.000Z",
+              "updatedAt": "2026-04-01T00:00:00.000Z",
+              "archived": true,
+              "archivedAt": "2026-04-02T00:00:00.000Z"
+            }
+          ]
+        },
+        "localTombstones": []
+      },
+      "expected": {
+        "notes": [
+          {
+            "id": "a",
+            "title": "a",
+            "text": "a body",
+            "createdAt": "2026-05-01T00:00:00.000Z",
+            "updatedAt": "2026-05-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          },
+          {
+            "id": "z",
+            "title": "z",
+            "text": "z body",
+            "createdAt": "2026-04-01T00:00:00.000Z",
+            "updatedAt": "2026-04-01T00:00:00.000Z",
+            "archived": true,
+            "archivedAt": "2026-04-02T00:00:00.000Z"
+          }
+        ],
+        "tombstones": []
+      }
+    },
+    {
+      "name": "result notes are ordered newest updatedAt first",
+      "input": {
+        "localNotes": [
+          {
+            "id": "mid",
+            "title": "mid",
+            "text": "mid body",
+            "html": "",
+            "createdAt": "2026-05-01T00:00:00.000Z",
+            "updatedAt": "2026-05-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          },
+          {
+            "id": "new",
+            "title": "new",
+            "text": "new body",
+            "html": "",
+            "createdAt": "2026-08-01T00:00:00.000Z",
+            "updatedAt": "2026-08-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "remotePayload": {
+          "notes": [
+            {
+              "id": "old",
+              "title": "old",
+              "text": "old body",
+              "html": "",
+              "createdAt": "2026-02-01T00:00:00.000Z",
+              "updatedAt": "2026-02-01T00:00:00.000Z",
+              "archived": false,
+              "archivedAt": ""
+            }
+          ]
+        },
+        "localTombstones": []
+      },
+      "expected": {
+        "notes": [
+          {
+            "id": "new",
+            "title": "new",
+            "text": "new body",
+            "createdAt": "2026-08-01T00:00:00.000Z",
+            "updatedAt": "2026-08-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          },
+          {
+            "id": "mid",
+            "title": "mid",
+            "text": "mid body",
+            "createdAt": "2026-05-01T00:00:00.000Z",
+            "updatedAt": "2026-05-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          },
+          {
+            "id": "old",
+            "title": "old",
+            "text": "old body",
+            "createdAt": "2026-02-01T00:00:00.000Z",
+            "updatedAt": "2026-02-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "tombstones": []
+      }
+    }
+  ]
+}

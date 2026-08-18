@@ -1,0 +1,169 @@
+{
+  "suite": "normalize_cloud_notes_payload",
+  "fn": "kanoNormalizeCloudNotesPayload",
+  "argOrder": [
+    "payload"
+  ],
+  "frozenNow": "2026-08-16T00:00:00.000Z",
+  "contractNoteFields": [
+    "id",
+    "title",
+    "text",
+    "createdAt",
+    "updatedAt",
+    "archived",
+    "archivedAt"
+  ],
+  "generatedFrom": "modules/kano_notes.js",
+  "cases": [
+    {
+      "name": "reads { notes: [...] }",
+      "input": {
+        "payload": {
+          "notes": [
+            {
+              "id": "a",
+              "title": "a",
+              "text": "a body",
+              "html": "",
+              "createdAt": "2026-05-01T00:00:00.000Z",
+              "updatedAt": "2026-05-01T00:00:00.000Z",
+              "archived": false,
+              "archivedAt": ""
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "id": "a",
+          "title": "a",
+          "text": "a body",
+          "createdAt": "2026-05-01T00:00:00.000Z",
+          "updatedAt": "2026-05-01T00:00:00.000Z",
+          "archived": false,
+          "archivedAt": ""
+        }
+      ]
+    },
+    {
+      "name": "reads a bare array",
+      "input": {
+        "payload": [
+          {
+            "id": "a",
+            "title": "a",
+            "text": "a body",
+            "html": "",
+            "createdAt": "2026-05-01T00:00:00.000Z",
+            "updatedAt": "2026-05-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ]
+      },
+      "expected": [
+        {
+          "id": "a",
+          "title": "a",
+          "text": "a body",
+          "createdAt": "2026-05-01T00:00:00.000Z",
+          "updatedAt": "2026-05-01T00:00:00.000Z",
+          "archived": false,
+          "archivedAt": ""
+        }
+      ]
+    },
+    {
+      "name": "reads { data: { notes: [...] } }",
+      "input": {
+        "payload": {
+          "data": {
+            "notes": [
+              {
+                "id": "a",
+                "title": "a",
+                "text": "a body",
+                "html": "",
+                "createdAt": "2026-05-01T00:00:00.000Z",
+                "updatedAt": "2026-05-01T00:00:00.000Z",
+                "archived": false,
+                "archivedAt": ""
+              }
+            ]
+          }
+        }
+      },
+      "expected": [
+        {
+          "id": "a",
+          "title": "a",
+          "text": "a body",
+          "createdAt": "2026-05-01T00:00:00.000Z",
+          "updatedAt": "2026-05-01T00:00:00.000Z",
+          "archived": false,
+          "archivedAt": ""
+        }
+      ]
+    },
+    {
+      "name": "reads { activeNotes, archivedNotes }",
+      "doc": "activeNotes forced archived:false, archivedNotes forced archived:true",
+      "input": {
+        "payload": {
+          "activeNotes": [
+            {
+              "id": "a",
+              "title": "a",
+              "text": "a body",
+              "html": "",
+              "createdAt": "2026-05-01T00:00:00.000Z",
+              "updatedAt": "2026-05-01T00:00:00.000Z",
+              "archived": false,
+              "archivedAt": ""
+            }
+          ],
+          "archivedNotes": [
+            {
+              "id": "b",
+              "title": "b",
+              "text": "b body",
+              "html": "",
+              "createdAt": "2026-04-01T00:00:00.000Z",
+              "updatedAt": "2026-04-01T00:00:00.000Z",
+              "archived": true,
+              "archivedAt": "2026-04-02T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "id": "a",
+          "title": "a",
+          "text": "a body",
+          "createdAt": "2026-05-01T00:00:00.000Z",
+          "updatedAt": "2026-05-01T00:00:00.000Z",
+          "archived": false,
+          "archivedAt": ""
+        },
+        {
+          "id": "b",
+          "title": "b",
+          "text": "b body",
+          "createdAt": "2026-04-01T00:00:00.000Z",
+          "updatedAt": "2026-04-01T00:00:00.000Z",
+          "archived": true,
+          "archivedAt": "2026-04-02T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "junk payload yields an empty list",
+      "input": {
+        "payload": 42
+      },
+      "expected": []
+    }
+  ]
+}
