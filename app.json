@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Kano",
+    "slug": "kano-mobile",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "scheme": "kano",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.kano.mobile"
+    },
+    "android": {
+      "package": "com.kano.mobile"
+    },
+    "plugins": [
+      "react-native-app-auth"
+    ]
+  }
+}

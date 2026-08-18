@@ -4,13 +4,35 @@
   "version": "0.0.1",
   "description": "Kano for mobile (React Native) — Notes + Owl. Shares notes with the Kano Chrome extension over Google Drive.",
   "license": "UNLICENSED",
+  "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.json && node --test dist/test/*.test.js"
+    "typecheck:app": "tsc -p tsconfig.app.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --test dist/test/*.test.js",
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "prebuild": "expo prebuild"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "1.23.1",
+    "@react-navigation/bottom-tabs": "^7.0.0",
+    "@react-navigation/native": "^7.0.0",
+    "@react-navigation/native-stack": "^7.0.0",
+    "expo": "~52.0.0",
+    "expo-status-bar": "~2.0.0",
+    "react": "18.3.1",
+    "react-native": "0.76.5",
+    "react-native-app-auth": "^8.0.2",
+    "react-native-keychain": "^9.2.2",
+    "react-native-render-html": "^6.3.4",
+    "react-native-safe-area-context": "4.12.0",
+    "react-native-screens": "~4.4.0"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",
+    "@types/react": "~18.3.12",
     "typescript": "^5.6.3"
   }
 }
