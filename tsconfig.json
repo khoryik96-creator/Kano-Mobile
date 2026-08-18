@@ -13,5 +13,7 @@
     "resolveJsonModule": true,
     "declaration": false
   },
-  "include": ["src", "test"]
+  "include": ["src", "test"],
+  "//": "The Node build/test gate covers the pure core/platform/ui only. The React Native app (app/) and the native adapter implementations (src/platform/native/, which import RN modules) are built by Expo/Metro on device — see tsconfig.app.json — so they are excluded here to keep `npm test` runnable with the minimal Node toolchain.",
+  "exclude": ["node_modules", "dist", "app", "src/platform/native"]
 }

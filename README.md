@@ -9,15 +9,18 @@ independent clients speaking one data contract, so the extension is never modifi
 
 ## Status
 
-**Phases 2–4 — everything that runs without a device (Node-verified).** The notes
-merge/identity engine, the Google Drive sync layer, the Owl/AI clients, the platform
-adapter *ports*, and the pure screen *presenters* are all ported to TypeScript and
-**verified against the extension's own behaviour** in Node: 29 contract fixtures from the
-live `kano_notes.js`, plus fake-transport suites for the Drive REST layer, the AI
-providers, the platform ports, the UI presenters, and an end-to-end layer test. What
-remains is strictly the on-device half — the `.tsx` views, the real native adapters,
-the Expo shell, a live Drive round-trip, and live provider calls (all needing a device
-and real credentials). See the roadmap below.
+**Phases 2–4 built; a full Expo app scaffold is in place.** The platform-agnostic core
+(notes merge, Drive sync, Owl/AI), the platform adapter *ports*, and the pure screen
+*presenters* are ported to TypeScript and **verified in Node** — 29 contract fixtures
+from the live `kano_notes.js`, plus fake-transport suites and an end-to-end layer test
+(**`npm test` → 46/46**). On top of that sits a complete React Native (Expo) app: the
+native adapter implementations, the four screens (`.tsx`), navigation, and the state
+glue that wires it all together.
+
+> **Two verification tiers.** The `core`/`platform`/`ui` logic is Node-verified and is
+> the `npm test` gate. The React Native app (`App.tsx`, `app/`, `src/platform/native/`)
+> is written but **not yet run on a device** — it builds and gets its first real test on
+> the maintainer's machine. To run it, follow **[`docs/RUNNING_ON_DEVICE.md`](docs/RUNNING_ON_DEVICE.md)**.
 
 ```
 src/core/notes/     pure TypeScript, no React Native — runs in Node
@@ -54,6 +57,12 @@ src/ui/             pure screen PRESENTERS (the non-visual half; .tsx views are 
   owlChat.ts        the ask flow: buildOwlPrompt → callAiText → append (cost/errors)
   settings.ts       provider + API-key validation
   index.ts          public surface
+src/platform/native/  REAL adapters (RN native modules) — excluded from the Node build
+  secureStoreKeychain.ts · googleAuthAppAuth.ts · noteStoreAsyncStorage.ts
+App.tsx · app/       Expo app: state glue, navigation, and the four screens (.tsx)
+  state.tsx         wires platform + core + ui presenters; the app's single brain
+  navigation.tsx    bottom tabs (Notes / Owl / Settings); Notes → Editor stack
+  screens/          NotesList · NoteEditor · OwlChat (HTML render) · Settings
 test/
   fixtures/         contract corpus vendored from Kano/mobile/contract (ground truth)
   contract.test.ts  proves the core reproduces the extension's outputs exactly
@@ -67,12 +76,24 @@ test/
 
 ## Develop
 
-Requires Node 20+.
+**The core (Node — no device).** This is the `npm test` gate and covers everything in
+`src/core`, `src/platform` (ports), and `src/ui`.
 
 ```bash
 npm install
-npm test         # tsc build + contract conformance (29 cases)
+npm test            # tsc build + all 46 tests (29 contract + sync/ai/owl/platform/ui/e2e)
 npm run typecheck
+```
+
+**The app (React Native — on a device).** The Expo app in `App.tsx` / `app/` /
+`src/platform/native/` is built by Expo/Metro, not by `npm test`. See
+**[`docs/RUNNING_ON_DEVICE.md`](docs/RUNNING_ON_DEVICE.md)** for the full setup (Google
+OAuth client, API keys, dev build). In short:
+
+```bash
+npx expo install    # align native module versions with the Expo SDK
+npm run ios         # or: npm run android   (a dev build — not Expo Go)
+npm run typecheck:app
 ```
 
 ## The contract (why the fixtures matter)
@@ -100,14 +121,14 @@ one-character change to the merge rule fails the suite.
       model, markdown rendering, and prompt building are pinned by a fake fetch and
       direct assertions. Remaining: **live provider calls**, which need the user's own
       Claude/DeepSeek API key on a device.
-- [~] **Phase 4** — React Native UI (Notes list/editor, Owl chat, settings). **Headless
-      slice done and Node-verified**: the `platform` adapter *ports* (+ in-memory fakes)
-      and the pure screen *presenters* — the non-visual half of each screen — compose
-      `core` end-to-end (see `app.test.ts`: edit → cache → push → second device pulls).
-      Remaining (device-side): the `.tsx` views, the real native adapter implementations
-      (`react-native-keychain`, `react-native-app-auth`, AsyncStorage), and the Expo app
-      shell + navigation.
-- [ ] **Phase 5** — native glue (`react-native-app-auth`, `react-native-keychain`) and
-      iOS + Android builds. *(Device builds run on the maintainer's machine.)*
+- [~] **Phase 4** — React Native UI. **Node-verified half done** (platform ports +
+      pure presenters, composed end-to-end in `app.test.ts`) **and the app is scaffolded**:
+      the `.tsx` screens, navigation, the state glue, and the real native adapters are all
+      written. Remaining: run it on a device and shake out first-launch issues.
+- [~] **Phase 5** — native glue + builds. The `react-native-app-auth` (PKCE) and
+      `react-native-keychain` / AsyncStorage adapters are implemented behind the ports and
+      wired into the app. Remaining (maintainer's machine): a Google OAuth client, the
+      iOS/Android dev builds, and the **live extension ↔ phone round-trip** — the go/no-go
+      gate. See [`docs/RUNNING_ON_DEVICE.md`](docs/RUNNING_ON_DEVICE.md).
 
 Not in v1: note reminders, JobAdder lookup, CV/Salary/LinkedIn, Mac desktop.

@@ -1,0 +1,13 @@
+{
+  "//": "React Native / Expo build config. Covers the whole tree including app/ and the native adapters (src/platform/native/). Expo/Metro use this on device; it is NOT part of `npm test` (that uses tsconfig.json, the pure Node subset). Run `npm run typecheck:app` after `npx expo install` has pulled the RN type packages.",
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "jsx": "react-native",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["app", "src", "App.tsx"]
+}
