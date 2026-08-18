@@ -9,13 +9,15 @@ independent clients speaking one data contract, so the extension is never modifi
 
 ## Status
 
-**Phases 2–3 — the platform-agnostic core (offline-complete).** The notes
-merge/identity engine, the Google Drive sync layer, and the Owl/AI clients are all
-ported to TypeScript and **verified against the extension's own behaviour** in Node:
-29 contract fixtures from the live `kano_notes.js`, plus fake-transport suites for the
-Drive REST layer and the AI providers. What remains for each is the on-device half —
-a live Drive round-trip and live provider calls, both needing real credentials on a
-device. See the roadmap below.
+**Phases 2–4 — everything that runs without a device (Node-verified).** The notes
+merge/identity engine, the Google Drive sync layer, the Owl/AI clients, the platform
+adapter *ports*, and the pure screen *presenters* are all ported to TypeScript and
+**verified against the extension's own behaviour** in Node: 29 contract fixtures from the
+live `kano_notes.js`, plus fake-transport suites for the Drive REST layer, the AI
+providers, the platform ports, the UI presenters, and an end-to-end layer test. What
+remains is strictly the on-device half — the `.tsx` views, the real native adapters,
+the Expo shell, a live Drive round-trip, and live provider calls (all needing a device
+and real credentials). See the roadmap below.
 
 ```
 src/core/notes/     pure TypeScript, no React Native — runs in Node
@@ -41,12 +43,26 @@ src/core/owl/       Owl chat core — prompt building + markdown render model (p
   prompt.ts         OWL_SYSTEM_PROMPT · buildOwlPrompt (name/page/recent-chat envelope)
   chat.ts           message model · recent-chat-for-prompt (drops on-device messages)
   index.ts          public surface
+src/platform/       thin native-adapter PORTS + Node fakes (real impls are device-side)
+  secureStore.ts    SecureStore port (react-native-keychain) + InMemory fake
+  googleAuth.ts     Google OAuth port (react-native-app-auth PKCE) + DriveTokenProvider
+  noteStore.ts      on-device note cache port (AsyncStorage) + InMemory fake
+  index.ts          public surface
+src/ui/             pure screen PRESENTERS (the non-visual half; .tsx views are device-side)
+  notesList.ts      active/archived split + search
+  noteEditor.ts     draft → Note · archive · delete → tombstone (via core primitives)
+  owlChat.ts        the ask flow: buildOwlPrompt → callAiText → append (cost/errors)
+  settings.ts       provider + API-key validation
+  index.ts          public surface
 test/
   fixtures/         contract corpus vendored from Kano/mobile/contract (ground truth)
   contract.test.ts  proves the core reproduces the extension's outputs exactly
   sync.test.ts      in-memory fake Drive (ETag/If-Match/412) drives the real merge
   ai.test.ts        fake fetch pins provider request shapes, parsing, and cost math
   owl.test.ts       markdown rendering + prompt building match the extension
+  platform.test.ts  secure store · Google token provider · note cache (fakes)
+  ui.test.ts        notes list/editor/settings presenters + Owl ask flow
+  app.test.ts       end-to-end: edit → cache → push → second device retrieves
 ```
 
 ## Develop
@@ -84,8 +100,14 @@ one-character change to the merge rule fails the suite.
       model, markdown rendering, and prompt building are pinned by a fake fetch and
       direct assertions. Remaining: **live provider calls**, which need the user's own
       Claude/DeepSeek API key on a device.
-- [ ] **Phase 4** — React Native UI (Notes list/editor, Owl chat, settings).
+- [~] **Phase 4** — React Native UI (Notes list/editor, Owl chat, settings). **Headless
+      slice done and Node-verified**: the `platform` adapter *ports* (+ in-memory fakes)
+      and the pure screen *presenters* — the non-visual half of each screen — compose
+      `core` end-to-end (see `app.test.ts`: edit → cache → push → second device pulls).
+      Remaining (device-side): the `.tsx` views, the real native adapter implementations
+      (`react-native-keychain`, `react-native-app-auth`, AsyncStorage), and the Expo app
+      shell + navigation.
 - [ ] **Phase 5** — native glue (`react-native-app-auth`, `react-native-keychain`) and
-      iOS + Android builds.
+      iOS + Android builds. *(Device builds run on the maintainer's machine.)*
 
 Not in v1: note reminders, JobAdder lookup, CV/Salary/LinkedIn, Mac desktop.
