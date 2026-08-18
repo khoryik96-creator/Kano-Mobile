@@ -1,0 +1,90 @@
+{
+  "suite": "merge_notes_for_commit",
+  "fn": "kanoMergeNotesForCommit",
+  "argOrder": [
+    "current",
+    "incoming"
+  ],
+  "frozenNow": "2026-08-16T00:00:00.000Z",
+  "contractNoteFields": [
+    "id",
+    "title",
+    "text",
+    "createdAt",
+    "updatedAt",
+    "archived",
+    "archivedAt"
+  ],
+  "generatedFrom": "modules/kano_notes.js",
+  "cases": [
+    {
+      "name": "incoming newer than current wins; older incoming ignored",
+      "input": {
+        "current": [
+          {
+            "id": "a",
+            "title": "a",
+            "text": "a body",
+            "html": "",
+            "createdAt": "2026-05-01T00:00:00.000Z",
+            "updatedAt": "2026-05-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          },
+          {
+            "id": "b",
+            "title": "b",
+            "text": "b body",
+            "html": "",
+            "createdAt": "2026-05-01T00:00:00.000Z",
+            "updatedAt": "2026-05-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ],
+        "incoming": [
+          {
+            "id": "a",
+            "title": "A2",
+            "text": "A2 body",
+            "html": "",
+            "createdAt": "2026-06-01T00:00:00.000Z",
+            "updatedAt": "2026-06-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          },
+          {
+            "id": "b",
+            "title": "Bold",
+            "text": "stale",
+            "html": "",
+            "createdAt": "2026-04-01T00:00:00.000Z",
+            "updatedAt": "2026-04-01T00:00:00.000Z",
+            "archived": false,
+            "archivedAt": ""
+          }
+        ]
+      },
+      "expected": [
+        {
+          "id": "a",
+          "title": "A2",
+          "text": "A2 body",
+          "createdAt": "2026-06-01T00:00:00.000Z",
+          "updatedAt": "2026-06-01T00:00:00.000Z",
+          "archived": false,
+          "archivedAt": ""
+        },
+        {
+          "id": "b",
+          "title": "b",
+          "text": "b body",
+          "createdAt": "2026-05-01T00:00:00.000Z",
+          "updatedAt": "2026-05-01T00:00:00.000Z",
+          "archived": false,
+          "archivedAt": ""
+        }
+      ]
+    }
+  ]
+}

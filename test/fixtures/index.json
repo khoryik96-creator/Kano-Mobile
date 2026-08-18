@@ -1,0 +1,47 @@
+{
+  "generatedFrom": "modules/kano_notes.js",
+  "frozenNow": "2026-08-16T00:00:00.000Z",
+  "suites": [
+    {
+      "suite": "stable_id",
+      "fn": "kanoStableNoteIdFromRecord",
+      "cases": 3
+    },
+    {
+      "suite": "sort_notes",
+      "fn": "kanoSortNotes",
+      "cases": 1
+    },
+    {
+      "suite": "normalize_tombstones",
+      "fn": "kanoNormalizeNoteTombstones",
+      "cases": 2
+    },
+    {
+      "suite": "normalize_cloud_notes_payload",
+      "fn": "kanoNormalizeCloudNotesPayload",
+      "cases": 5
+    },
+    {
+      "suite": "normalize_cloud_tombstones_payload",
+      "fn": "kanoNormalizeCloudTombstonesPayload",
+      "cases": 3
+    },
+    {
+      "suite": "merge_notes_for_commit",
+      "fn": "kanoMergeNotesForCommit",
+      "cases": 1
+    },
+    {
+      "suite": "resolve_notes_and_tombstones",
+      "fn": "kanoResolveNotesAndTombstones",
+      "cases": 2
+    },
+    {
+      "suite": "merge_note_state",
+      "fn": "kanoMergeNoteState",
+      "cases": 12
+    }
+  ],
+  "totalCases": 29
+}

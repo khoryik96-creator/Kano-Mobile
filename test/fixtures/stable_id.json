@@ -1,0 +1,61 @@
+{
+  "suite": "stable_id",
+  "fn": "kanoStableNoteIdFromRecord",
+  "argOrder": [
+    "rec"
+  ],
+  "frozenNow": "2026-08-16T00:00:00.000Z",
+  "contractNoteFields": [
+    "id",
+    "title",
+    "text",
+    "createdAt",
+    "updatedAt",
+    "archived",
+    "archivedAt"
+  ],
+  "generatedFrom": "modules/kano_notes.js",
+  "cases": [
+    {
+      "name": "deterministic hash of a record",
+      "doc": "FNV-1a over [id,title,createdAt,updatedAt,text,html] (first 1000 chars); note_<base36>",
+      "input": {
+        "rec": {
+          "id": "",
+          "title": "Kickoff",
+          "text": "Call the client",
+          "html": "",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-02T09:30:00.000Z"
+        }
+      },
+      "expected": "note_1o0lnuh"
+    },
+    {
+      "name": "same content yields the same id",
+      "input": {
+        "rec": {
+          "title": "Kickoff",
+          "text": "Call the client",
+          "html": "",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-02T09:30:00.000Z"
+        }
+      },
+      "expected": "note_1o0lnuh"
+    },
+    {
+      "name": "different text yields a different id",
+      "input": {
+        "rec": {
+          "title": "Kickoff",
+          "text": "Call the vendor",
+          "html": "",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-02T09:30:00.000Z"
+        }
+      },
+      "expected": "note_1eri7e6"
+    }
+  ]
+}

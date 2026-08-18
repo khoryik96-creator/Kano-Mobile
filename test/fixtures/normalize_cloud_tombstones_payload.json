@@ -1,0 +1,71 @@
+{
+  "suite": "normalize_cloud_tombstones_payload",
+  "fn": "kanoNormalizeCloudTombstonesPayload",
+  "argOrder": [
+    "payload"
+  ],
+  "frozenNow": "2026-08-16T00:00:00.000Z",
+  "contractNoteFields": [
+    "id",
+    "title",
+    "text",
+    "createdAt",
+    "updatedAt",
+    "archived",
+    "archivedAt"
+  ],
+  "generatedFrom": "modules/kano_notes.js",
+  "cases": [
+    {
+      "name": "reads { tombstones: [...] }",
+      "input": {
+        "payload": {
+          "tombstones": [
+            {
+              "id": "a",
+              "deletedAt": "2026-08-01T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "id": "a",
+          "deletedAt": "2026-08-01T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "reads { data: { tombstones: [...] } }",
+      "input": {
+        "payload": {
+          "data": {
+            "tombstones": [
+              {
+                "id": "a",
+                "deletedAt": "2026-08-01T00:00:00.000Z"
+              }
+            ]
+          }
+        }
+      },
+      "expected": [
+        {
+          "id": "a",
+          "deletedAt": "2026-08-01T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "junk payload yields an empty list",
+      "input": {
+        "payload": [
+          1,
+          2,
+          3
+        ]
+      },
+      "expected": []
+    }
+  ]
+}
