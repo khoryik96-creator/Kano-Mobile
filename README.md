@@ -9,10 +9,13 @@ independent clients speaking one data contract, so the extension is never modifi
 
 ## Status
 
-**Phase 2 — the notes core (in progress).** The merge/identity engine that keeps
-mobile and the extension in sync is ported to TypeScript and **verified against the
-extension's own behaviour**: 29 contract fixtures, generated from the live
-`kano_notes.js`, all pass in Node.
+**Phases 2–3 — the platform-agnostic core (offline-complete).** The notes
+merge/identity engine, the Google Drive sync layer, and the Owl/AI clients are all
+ported to TypeScript and **verified against the extension's own behaviour** in Node:
+29 contract fixtures from the live `kano_notes.js`, plus fake-transport suites for the
+Drive REST layer and the AI providers. What remains for each is the on-device half —
+a live Drive round-trip and live provider calls, both needing real credentials on a
+device. See the roadmap below.
 
 ```
 src/core/notes/     pure TypeScript, no React Native — runs in Node
@@ -27,10 +30,23 @@ src/core/sync/      Google Drive REST layer — transport injected, runs in Node
   syncNotes.ts      pushNotes · retrieveNotes · inspectCloud — drives mergeNoteState
   types.ts          FetchLike / TokenProvider injection points
   index.ts          public surface
+src/core/ai/        AI provider client — fetch injected (native fetch, no CORS)
+  client.ts         callClaude/DeepSeek Text+JSON + provider-dispatch wrappers
+  usage.ts          estimateUsage cost model · feature labels · ledger op id
+  providers.ts      provider metadata + model ids · normalizeProvider
+  json.ts           extractJsonCandidate · parseJsonFromText
+  index.ts          public surface
+src/core/owl/       Owl chat core — prompt building + markdown render model (pure)
+  markdown.ts       inline + block markdown → safe HTML (lists/tables/headings)
+  prompt.ts         OWL_SYSTEM_PROMPT · buildOwlPrompt (name/page/recent-chat envelope)
+  chat.ts           message model · recent-chat-for-prompt (drops on-device messages)
+  index.ts          public surface
 test/
   fixtures/         contract corpus vendored from Kano/mobile/contract (ground truth)
   contract.test.ts  proves the core reproduces the extension's outputs exactly
   sync.test.ts      in-memory fake Drive (ETag/If-Match/412) drives the real merge
+  ai.test.ts        fake fetch pins provider request shapes, parsing, and cost math
+  owl.test.ts       markdown rendering + prompt building match the extension
 ```
 
 ## Develop
@@ -62,8 +78,12 @@ one-character change to the merge rule fails the suite.
       conflict-retry convergence, and cross-client round-trip against the real merge.
       Remaining: the **live round-trip** against the extension's real Drive file, which
       needs real Google OAuth credentials on a device (the on-hardware half of this phase).
-- [ ] **Phase 3** — `core/owl` + `core/ai`: prompt building, markdown model, and the
-      Anthropic/DeepSeek calls (native `fetch`, no CORS).
+- [~] **Phase 3** — `core/owl` + `core/ai`: prompt building, markdown model, and the
+      Anthropic/DeepSeek calls (native `fetch`, no CORS). **Code complete and
+      offline-verified** — request shapes, response parsing, JSON extraction, cost
+      model, markdown rendering, and prompt building are pinned by a fake fetch and
+      direct assertions. Remaining: **live provider calls**, which need the user's own
+      Claude/DeepSeek API key on a device.
 - [ ] **Phase 4** — React Native UI (Notes list/editor, Owl chat, settings).
 - [ ] **Phase 5** — native glue (`react-native-app-auth`, `react-native-keychain`) and
       iOS + Android builds.
