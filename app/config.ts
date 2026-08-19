@@ -5,7 +5,9 @@
 
 export const GOOGLE_OAUTH = {
   clientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || '',
-  redirectUrl: process.env.EXPO_PUBLIC_GOOGLE_REDIRECT_URL || 'com.kano.mobile:/oauthredirect',
+  // Optional — when unset, expo-auth-session derives the redirect from the app's own
+  // `kano://` scheme (see app.json). Set EXPO_PUBLIC_GOOGLE_REDIRECT_URL only to force one.
+  redirectUri: process.env.EXPO_PUBLIC_GOOGLE_REDIRECT_URL || undefined,
 };
 
 export function googleConfigured(): boolean {
