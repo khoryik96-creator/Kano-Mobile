@@ -4,12 +4,12 @@ import { SECURE_KEYS } from './secureStore';
 
 // Platform port — Google OAuth for Drive (plan §3.7). The extension uses the implicit
 // flow via chrome.identity; mobile uses the authorization-code + PKCE flow via
-// react-native-app-auth (implicit is deprecated on native). Same scopes, same
+// expo-auth-session (implicit is deprecated on native). Same scopes, same
 // appDataFolder file — only the token flow differs, the data contract does not.
 //
 // This module defines the auth port + the persisted session shape, and adapts a stored
 // token into core/sync's TokenProvider so the Drive client stays transport-agnostic.
-// The real signIn() is a thin react-native-app-auth call on device; a fake backs tests.
+// The real signIn() is a thin expo-auth-session call on device; a fake backs tests.
 
 /** OAuth scopes — identical to the extension (drive.appdata + userinfo.email). */
 export const DRIVE_OAUTH_SCOPES = [

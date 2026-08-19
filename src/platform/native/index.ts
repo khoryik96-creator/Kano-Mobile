@@ -4,6 +4,6 @@
 // port contracts they satisfy are tested in Node via the in-memory fakes.
 
 export { KeychainSecureStore } from './secureStoreKeychain';
-export { AppAuthGoogleClient } from './googleAuthAppAuth';
-export type { GoogleAuthOptions } from './googleAuthAppAuth';
+export { ExpoGoogleAuthClient } from './googleAuthExpo';
+export type { GoogleAuthOptions } from './googleAuthExpo';
 export { AsyncStorageNoteStore } from './noteStoreAsyncStorage';

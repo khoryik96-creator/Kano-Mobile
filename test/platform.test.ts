@@ -11,7 +11,7 @@ import {
 } from '../src/platform';
 
 // Tests for the platform ports via their in-memory fakes. The real adapters wrap
-// react-native-keychain / react-native-app-auth / AsyncStorage on device; the port
+// react-native-keychain / expo-auth-session / AsyncStorage on device; the port
 // contracts (and the token-provider adaptation into core/sync) are proven here.
 
 test('platform: SecureStore stores, reads, and deletes', async () => {

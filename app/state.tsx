@@ -11,7 +11,7 @@ import {
   SECURE_KEYS,
   EMPTY_NOTE_STATE,
 } from '../src/platform';
-import { KeychainSecureStore, AppAuthGoogleClient, AsyncStorageNoteStore } from '../src/platform/native';
+import { KeychainSecureStore, ExpoGoogleAuthClient, AsyncStorageNoteStore } from '../src/platform/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   commitDraft,
@@ -38,7 +38,7 @@ const secureStore = new KeychainSecureStore();
 const noteStore = new AsyncStorageNoteStore();
 const tokenProvider = createDriveTokenProvider(secureStore);
 const driveClient = new DriveClient(nativeFetch, tokenProvider);
-const googleAuth = new AppAuthGoogleClient(GOOGLE_OAUTH);
+const googleAuth = new ExpoGoogleAuthClient(GOOGLE_OAUTH);
 
 interface KanoContextValue {
   ready: boolean;
