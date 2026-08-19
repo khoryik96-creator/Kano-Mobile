@@ -15,7 +15,8 @@
       "package": "com.kano.mobile"
     },
     "plugins": [
-      "react-native-app-auth"
+      "react-native-app-auth",
+      "./plugins/withAndroidXBrowser"
     ]
   }
 }
