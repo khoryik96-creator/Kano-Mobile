@@ -16,7 +16,8 @@
     },
     "plugins": [
       "react-native-app-auth",
-      "./plugins/withAndroidXBrowser"
+      "./plugins/withAndroidXBrowser",
+      "./plugins/withKotlinVersion"
     ]
   }
 }
