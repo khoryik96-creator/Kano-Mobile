@@ -13,7 +13,8 @@
     "start": "expo start --dev-client",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "prebuild": "expo prebuild"
+    "prebuild": "expo prebuild",
+    "lint": "expo lint"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "1.23.1",
