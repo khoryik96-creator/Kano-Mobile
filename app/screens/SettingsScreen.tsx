@@ -63,9 +63,11 @@ export function SettingsScreen() {
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <Text style={styles.section}>Google Drive</Text>
-      <Text style={styles.hint}>
-        {settings.googleEmail ? 'Signed in as ' + settings.googleEmail : 'Sign in to sync notes with the Kano extension.'}
-      </Text>
+      {settings.googleEmail ? (
+        <Text style={styles.connected}>● Signed in as {settings.googleEmail}</Text>
+      ) : (
+        <Text style={styles.hint}>Sign in to sync notes with the Kano extension.</Text>
+      )}
       {!googleConfigured() ? <Text style={styles.warn}>Set EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID first (see docs/RUNNING_ON_DEVICE.md).</Text> : null}
       <Pressable style={[styles.btn, styles.primary]} onPress={() => void promptAsync()} disabled={busy || !request || !googleConfigured()}>
         <Text style={styles.primaryText}>{settings.googleEmail ? 'Re-sign in' : 'Sign in with Google'}</Text>
@@ -102,6 +104,7 @@ const styles = StyleSheet.create({
   content: { padding: 16, gap: 8 },
   section: { fontSize: 16, fontWeight: '700', marginTop: 16, color: '#111' },
   hint: { color: '#555' },
+  connected: { color: '#16a34a', fontWeight: '600' },
   warn: { color: '#b45309' },
   label: { color: '#333', marginTop: 8, fontWeight: '600' },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },

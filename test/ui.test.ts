@@ -63,6 +63,16 @@ test('ui/noteEditor: delete removes the note and records a tombstone', () => {
   assert.deepEqual(state.tombstones.map((t) => t.id), [id]);
 });
 
+test('ui/noteEditor: multi-line text produces line-break HTML (renders right in the extension)', () => {
+  let state: NoteState = { notes: [], tombstones: [] };
+  state = commitDraft(state, { title: 'Keys', text: 'line one\nline two' }, NOW);
+  assert.equal(state.notes[0]!.html, '<p>line one<br>line two</p>');
+
+  // HTML is escaped so note text can never inject markup into the extension's renderer.
+  const escaped = commitDraft({ notes: [], tombstones: [] }, { title: 'x', text: 'a < b & c' }, NOW);
+  assert.equal(escaped.notes[0]!.html, '<p>a &lt; b &amp; c</p>');
+});
+
 test('ui/settings: key validation, active key, normalization', () => {
   assert.equal(validateApiKey('claude', 'sk-ant-abc').ok, true);
   assert.equal(validateApiKey('claude', 'sk-nope').ok, false);
