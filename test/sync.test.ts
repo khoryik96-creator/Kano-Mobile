@@ -153,7 +153,7 @@ const note = (id: string, updatedAt: string, over: Record<string, unknown> = {})
   ...over,
 });
 
-const ids = (list: Array<{ id: string }>) => list.map((n) => n.id).sort();
+const ids = (list: { id: string }[]) => list.map((n) => n.id).sort();
 
 // ── 1. First push creates the file; a later read sees it. ──
 test('sync: first push creates the appDataFolder file, then reads back', async () => {

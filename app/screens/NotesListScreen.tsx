@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, FlatList, TextInput, Pressable, StyleSheet, SectionList } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, SectionList } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 
 import { useKano } from '../state';
