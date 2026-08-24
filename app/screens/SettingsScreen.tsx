@@ -1,17 +1,54 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, Alert } from 'react-native';
+import * as Google from 'expo-auth-session/providers/google';
+import * as WebBrowser from 'expo-web-browser';
 
 import { useKano } from '../state';
 import { validateApiKey } from '../../src/ui';
-import { googleConfigured } from '../config';
+import { DRIVE_OAUTH_SCOPES } from '../../src/platform';
+import { GOOGLE_OAUTH, googleConfigured } from '../config';
 import type { AiProvider } from '../../src/core/ai';
 
+// Lets the auth browser tab hand the result back to the app (recommended once at load).
+WebBrowser.maybeCompleteAuthSession();
+
 export function SettingsScreen() {
-  const { settings, updateSettings, signIn, busy, status } = useKano();
+  const { settings, updateSettings, completeGoogleSignIn, busy, status } = useKano();
   const [provider, setProvider] = useState<AiProvider>(settings.provider);
   const [claudeApiKey, setClaudeApiKey] = useState(settings.claudeApiKey);
   const [deepSeekApiKey, setDeepSeekApiKey] = useState(settings.deepSeekApiKey);
   const [userName, setUserName] = useState(settings.userName);
+
+  // Google sign-in via expo-auth-session's Google provider. It handles the native
+  // redirect/client-type details; we pass the Drive scope and hand the returned token to
+  // the app state, which persists it and pulls the cloud notes.
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    androidClientId: GOOGLE_OAUTH.androidClientId,
+    webClientId: GOOGLE_OAUTH.webClientId,
+    scopes: ['openid', 'email', ...DRIVE_OAUTH_SCOPES],
+  });
+
+  useEffect(() => {
+    if (response?.type !== 'success') return;
+    const auth = response.authentication;
+    if (!auth?.accessToken) return;
+    void (async () => {
+      let email = '';
+      try {
+        const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: 'Bearer ' + auth.accessToken },
+        });
+        email = String(((await r.json()) as { email?: string })?.email || '');
+      } catch {
+        /* email is best-effort */
+      }
+      const expiresAt =
+        auth.issuedAt && auth.expiresIn
+          ? (auth.issuedAt + auth.expiresIn) * 1000
+          : Date.now() + (auth.expiresIn ? auth.expiresIn * 1000 : 3_600_000);
+      await completeGoogleSignIn({ accessToken: auth.accessToken, expiresAt, email, refreshToken: auth.refreshToken || undefined });
+    })();
+  }, [response, completeGoogleSignIn]);
 
   const onSave = async () => {
     const key = provider === 'deepseek' ? deepSeekApiKey : claudeApiKey;
@@ -29,8 +66,8 @@ export function SettingsScreen() {
       <Text style={styles.hint}>
         {settings.googleEmail ? 'Signed in as ' + settings.googleEmail : 'Sign in to sync notes with the Kano extension.'}
       </Text>
-      {!googleConfigured() ? <Text style={styles.warn}>Set EXPO_PUBLIC_GOOGLE_CLIENT_ID first (see README).</Text> : null}
-      <Pressable style={[styles.btn, styles.primary]} onPress={() => void signIn()} disabled={busy || !googleConfigured()}>
+      {!googleConfigured() ? <Text style={styles.warn}>Set EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID first (see docs/RUNNING_ON_DEVICE.md).</Text> : null}
+      <Pressable style={[styles.btn, styles.primary]} onPress={() => void promptAsync()} disabled={busy || !request || !googleConfigured()}>
         <Text style={styles.primaryText}>{settings.googleEmail ? 'Re-sign in' : 'Sign in with Google'}</Text>
       </Pressable>
 
