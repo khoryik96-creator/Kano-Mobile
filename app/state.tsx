@@ -11,7 +11,8 @@ import {
   SECURE_KEYS,
   EMPTY_NOTE_STATE,
 } from '../src/platform';
-import { KeychainSecureStore, ExpoGoogleAuthClient, AsyncStorageNoteStore } from '../src/platform/native';
+import type { GoogleSession } from '../src/platform';
+import { KeychainSecureStore, AsyncStorageNoteStore } from '../src/platform/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   commitDraft,
@@ -24,7 +25,6 @@ import {
   type NoteDraft,
   type SettingsState,
 } from '../src/ui';
-import { GOOGLE_OAUTH } from './config';
 
 // App state container — the single place that wires the platform adapters, the core
 // engines, and the ui presenters together. Screens read this via useKano() and call its
@@ -38,7 +38,6 @@ const secureStore = new KeychainSecureStore();
 const noteStore = new AsyncStorageNoteStore();
 const tokenProvider = createDriveTokenProvider(secureStore);
 const driveClient = new DriveClient(nativeFetch, tokenProvider);
-const googleAuth = new ExpoGoogleAuthClient(GOOGLE_OAUTH);
 
 interface KanoContextValue {
   ready: boolean;
@@ -51,7 +50,7 @@ interface KanoContextValue {
   removeNote: (id: string) => Promise<void>;
   archiveNote: (id: string, archived: boolean) => Promise<void>;
   syncNow: () => Promise<void>;
-  signIn: () => Promise<void>;
+  completeGoogleSignIn: (session: GoogleSession) => Promise<void>;
   ask: (input: string, pageContext?: OwlPageContext | null) => Promise<void>;
   updateSettings: (next: SettingsState) => Promise<void>;
 }
@@ -144,28 +143,33 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
     [persistNotes, syncNow],
   );
 
-  const signIn = useCallback(async () => {
-    setBusy(true);
-    setStatus('Signing in…');
-    try {
-      const session = await googleAuth.signIn();
-      await saveGoogleSession(secureStore, session);
-      const merged = await retrieveNotes(driveClient, {
-        localNotes: (await noteStore.load()).notes,
-        localTombstones: (await noteStore.load()).tombstones,
-        now: Date.now(),
-      });
-      await persistNotes(merged.state);
-      const next = normalizeSettings({ ...settings, googleEmail: session.email || '' });
-      setSettings(next);
-      await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...next, claudeApiKey: '', deepSeekApiKey: '' }));
-      setStatus('Signed in' + (session.email ? ' · ' + session.email : ''));
-    } catch (e) {
-      setStatus('Sign-in failed: ' + String((e as Error)?.message || e));
-    } finally {
-      setBusy(false);
-    }
-  }, [persistNotes, settings]);
+  // Called by the Settings screen once expo-auth-session's Google provider returns a
+  // token: persist the session, then pull + merge the cloud notes into local state.
+  const completeGoogleSignIn = useCallback(
+    async (session: GoogleSession) => {
+      setBusy(true);
+      setStatus('Signing in…');
+      try {
+        await saveGoogleSession(secureStore, session);
+        const cache = await noteStore.load();
+        const merged = await retrieveNotes(driveClient, {
+          localNotes: cache.notes,
+          localTombstones: cache.tombstones,
+          now: Date.now(),
+        });
+        await persistNotes(merged.state);
+        const next = normalizeSettings({ ...settings, googleEmail: session.email || '' });
+        setSettings(next);
+        await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...next, claudeApiKey: '', deepSeekApiKey: '' }));
+        setStatus('Signed in' + (session.email ? ' · ' + session.email : ''));
+      } catch (e) {
+        setStatus('Sign-in failed: ' + String((e as Error)?.message || e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [persistNotes, settings],
+  );
 
   const ask = useCallback(
     async (input: string, pageContext: OwlPageContext | null = null) => {
@@ -202,8 +206,8 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<KanoContextValue>(
-    () => ({ ready, busy, status, notes, settings, owlMessages, saveNote, removeNote, archiveNote, syncNow, signIn, ask, updateSettings }),
-    [ready, busy, status, notes, settings, owlMessages, saveNote, removeNote, archiveNote, syncNow, signIn, ask, updateSettings],
+    () => ({ ready, busy, status, notes, settings, owlMessages, saveNote, removeNote, archiveNote, syncNow, completeGoogleSignIn, ask, updateSettings }),
+    [ready, busy, status, notes, settings, owlMessages, saveNote, removeNote, archiveNote, syncNow, completeGoogleSignIn, ask, updateSettings],
   );
 
   return <KanoContext.Provider value={value}>{children}</KanoContext.Provider>;
