@@ -72,7 +72,7 @@ export class DriveClient {
       let msg = text || 'Google Drive HTTP ' + res.status;
       try {
         msg = (JSON.parse(text) as { error?: { message?: string } })?.error?.message || msg;
-      } catch (_) {
+      } catch {
         /* keep raw text */
       }
       const error: DriveError = new Error(msg.slice(0, 220));
@@ -84,7 +84,7 @@ export class DriveClient {
     if (text) {
       try {
         data = JSON.parse(text);
-      } catch (_) {
+      } catch {
         data = text;
       }
     }

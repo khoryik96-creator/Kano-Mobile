@@ -1,4 +1,4 @@
-import type { Note, Tombstone, RawNote, NoteState } from './model';
+import type { Note, RawNote, NoteState } from './model';
 import { noteUpdatedMs, normalizeNotesList, normalizeNoteTombstones, normalizeCloudNotesPayload, normalizeCloudTombstonesPayload } from './normalize';
 import { stableNoteIdFromRecord } from './identity';
 

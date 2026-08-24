@@ -59,7 +59,7 @@ const RUNNERS: Record<string, (input: Record<string, any>, now: number) => unkno
 };
 
 const index = readFixture('index');
-for (const { suite, fn } of index.suites as Array<{ suite: string; fn: string }>) {
+for (const { suite, fn } of index.suites as { suite: string; fn: string }[]) {
   const doc = readFixture(suite);
   const now = Date.parse(doc.frozenNow);
   const run = RUNNERS[fn];
@@ -73,6 +73,6 @@ for (const { suite, fn } of index.suites as Array<{ suite: string; fn: string }>
 }
 
 test('every fixture suite is exercised', () => {
-  const ran = new Set((index.suites as Array<{ fn: string }>).map((s) => s.fn));
+  const ran = new Set((index.suites as { fn: string }[]).map((s) => s.fn));
   for (const fn of Object.keys(RUNNERS)) assert.ok(ran.has(fn), `runner ${fn} has no fixture suite`);
 });
