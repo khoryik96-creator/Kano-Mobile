@@ -1,5 +1,18 @@
 import type { Note, NoteState } from '../core/notes';
 import { normalizeNotesList, normalizeNoteTombstones, mergeNotesForCommit } from '../core/notes';
+import { escHtml } from '../core/owl';
+
+/**
+ * Render plain note text to line-break-preserving HTML. The mobile editor is plain
+ * text, but the shared cloud note also carries an `html` field that the Chrome
+ * extension renders — so a phone-written multi-line note must emit real breaks, or it
+ * shows with collapsed lines in the extension. Text is HTML-escaped, newlines become
+ * `<br>`, wrapped in a paragraph. (Done here in the UI layer, not core/normalize, which
+ * is contract-locked to the extension's fixtures.)
+ */
+function textToHtml(text: string): string {
+  return '<p>' + escHtml(text).replace(/\r?\n/g, '<br>') + '</p>';
+}
 
 // Presenter for the NoteEditor screen (plan §2 src/ui) — the non-visual half: turn an
 // edited draft into a committed NoteState using the SAME core primitives the sync merge
@@ -45,7 +58,9 @@ export function commitDraft(state: NoteState, draft: NoteDraft, now: number = Da
     id: draft.id,
     title: draft.title,
     text: draft.text,
-    html: draft.html !== undefined ? draft.html : existing?.html,
+    // Explicit html wins; otherwise derive line-break-preserving html from the text
+    // (falling back to any existing html only when there is no text).
+    html: draft.html !== undefined ? draft.html : draft.text && draft.text.trim() ? textToHtml(draft.text) : existing?.html,
     importance: draft.importance !== undefined ? draft.importance : existing?.importance,
     createdAt: existing?.createdAt,
     updatedAt: nowIso,
