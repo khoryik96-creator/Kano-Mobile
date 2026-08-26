@@ -5,6 +5,7 @@
     "version": "0.0.1",
     "orientation": "portrait",
     "scheme": "kano",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -12,7 +13,11 @@
       "bundleIdentifier": "com.kano.mobile"
     },
     "android": {
-      "package": "com.kano.mobile"
+      "package": "com.kano.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#ffffff"
+      }
     },
     "plugins": [
       "./plugins/withKotlinVersion"
