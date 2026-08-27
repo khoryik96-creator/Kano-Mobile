@@ -4,6 +4,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 
 import { useKano } from '../state';
 import { noteToDraft, emptyDraft, IMPORTANCE_LEVELS, importanceLevel } from '../../src/ui';
+import { theme } from '../theme';
 
 export function NoteEditorScreen() {
   const nav = useNavigation<any>();
@@ -86,19 +87,19 @@ export function NoteEditorScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff' },
-  form: { padding: 16, gap: 12 },
-  title: { fontSize: 20, fontWeight: '700', borderBottomWidth: 1, borderBottomColor: '#eee', paddingVertical: 8 },
-  label: { color: '#333', fontWeight: '600', fontSize: 13 },
+  root: { flex: 1, backgroundColor: theme.surface },
+  form: { padding: 16, gap: 14 },
+  title: { fontSize: 22, fontWeight: '700', color: theme.text, borderBottomWidth: 1, borderBottomColor: theme.border, paddingVertical: 10 },
+  label: { color: theme.muted, fontWeight: '700', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
   importanceRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  importanceChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: '#ddd', backgroundColor: '#f7f7f7' },
-  importanceText: { fontWeight: '600', color: '#333', fontSize: 13 },
+  importanceChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, borderColor: theme.border, backgroundColor: theme.surface },
+  importanceText: { fontWeight: '700', color: theme.muted, fontSize: 13 },
   importanceTextOn: { color: '#fff' },
-  body: { fontSize: 16, minHeight: 240, lineHeight: 22 },
-  actions: { flexDirection: 'row', gap: 10, padding: 12, borderTopWidth: 1, borderTopColor: '#eee' },
-  btn: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 8, backgroundColor: '#f0f0f0' },
-  btnText: { fontWeight: '600', color: '#111' },
-  primary: { backgroundColor: '#2563eb' },
-  primaryText: { color: '#fff', fontWeight: '700' },
-  danger: { color: '#dc2626' },
+  body: { fontSize: 16, minHeight: 240, lineHeight: 23, color: theme.text },
+  actions: { flexDirection: 'row', gap: 10, padding: 14, borderTopWidth: 1, borderTopColor: theme.border, backgroundColor: theme.surface },
+  btn: { flexGrow: 1, alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, borderRadius: theme.radiusSm, backgroundColor: theme.surfaceMuted },
+  btnText: { fontWeight: '700', color: theme.text },
+  primary: { backgroundColor: theme.primary },
+  primaryText: { color: theme.onPrimary, fontWeight: '800' },
+  danger: { color: theme.danger },
 });
