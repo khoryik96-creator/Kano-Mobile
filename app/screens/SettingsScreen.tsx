@@ -7,6 +7,7 @@ import { useKano } from '../state';
 import { validateApiKey } from '../../src/ui';
 import { DRIVE_OAUTH_SCOPES } from '../../src/platform';
 import { GOOGLE_OAUTH, googleConfigured } from '../config';
+import { theme } from '../theme';
 import type { AiProvider } from '../../src/core/ai';
 
 // Lets the auth browser tab hand the result back to the app (recommended once at load).
@@ -100,22 +101,22 @@ export function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff' },
+  root: { flex: 1, backgroundColor: theme.bg },
   content: { padding: 16, gap: 8 },
-  section: { fontSize: 16, fontWeight: '700', marginTop: 16, color: '#111' },
-  hint: { color: '#555' },
-  connected: { color: '#16a34a', fontWeight: '600' },
+  section: { fontSize: 16, fontWeight: '800', marginTop: 16, color: theme.text },
+  hint: { color: theme.muted },
+  connected: { color: theme.success, fontWeight: '700' },
   warn: { color: '#b45309' },
-  label: { color: '#333', marginTop: 8, fontWeight: '600' },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  label: { color: theme.muted, marginTop: 8, fontWeight: '700', fontSize: 13 },
+  input: { backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, borderRadius: theme.radiusSm, paddingHorizontal: 12, paddingVertical: 10, color: theme.text },
   providerRow: { flexDirection: 'row', gap: 8 },
-  chip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#f0f0f0' },
-  chipOn: { backgroundColor: '#2563eb' },
-  chipText: { fontWeight: '600', color: '#111' },
-  chipTextOn: { color: '#fff' },
-  btn: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 8, backgroundColor: '#f0f0f0', alignItems: 'center' },
-  primary: { backgroundColor: '#2563eb' },
-  primaryText: { color: '#fff', fontWeight: '700' },
+  chip: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20, backgroundColor: theme.surfaceMuted },
+  chipOn: { backgroundColor: theme.primary },
+  chipText: { fontWeight: '700', color: theme.text },
+  chipTextOn: { color: theme.onPrimary },
+  btn: { paddingHorizontal: 16, paddingVertical: 13, borderRadius: theme.radiusSm, backgroundColor: theme.surfaceMuted, alignItems: 'center' },
+  primary: { backgroundColor: theme.primary },
+  primaryText: { color: theme.onPrimary, fontWeight: '800' },
   save: { marginTop: 20 },
-  status: { color: '#555', fontSize: 12, marginTop: 8 },
+  status: { color: theme.muted, fontSize: 12, marginTop: 8 },
 });
