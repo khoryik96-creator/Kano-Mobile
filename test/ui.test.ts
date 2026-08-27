@@ -12,6 +12,7 @@ import {
   activeApiKey,
   normalizeSettings,
   defaultSettings,
+  importanceLevel,
 } from '../src/ui';
 import type { NoteState } from '../src/core/notes';
 import type { AiFetch } from '../src/core/ai';
@@ -71,6 +72,26 @@ test('ui/noteEditor: multi-line text produces line-break HTML (renders right in 
   // HTML is escaped so note text can never inject markup into the extension's renderer.
   const escaped = commitDraft({ notes: [], tombstones: [] }, { title: 'x', text: 'a < b & c' }, NOW);
   assert.equal(escaped.notes[0]!.html, '<p>a &lt; b &amp; c</p>');
+});
+
+test('ui/importance: coercion clamps to 1..4 and defaults to Normal', () => {
+  assert.equal(importanceLevel(1).label, 'Low');
+  assert.equal(importanceLevel(4).label, 'Urgent');
+  assert.equal(importanceLevel(undefined).value, 2, 'default Normal');
+  assert.equal(importanceLevel(0).value, 2, '0 is unset → default Normal');
+  assert.equal(importanceLevel(-5).value, 1, 'clamped up to Low');
+  assert.equal(importanceLevel(9).value, 4, 'clamped down to Urgent');
+});
+
+test('ui/noteEditor: a draft carries its importance through commit', () => {
+  let state: NoteState = { notes: [], tombstones: [] };
+  state = commitDraft(state, { title: 'Hot', text: 'now', importance: 4 }, NOW);
+  assert.equal(state.notes[0]!.importance, 4);
+
+  // Editing without touching importance preserves the existing level.
+  const id = state.notes[0]!.id;
+  state = commitDraft(state, { id, title: 'Hot', text: 'later' }, LATER);
+  assert.equal(state.notes[0]!.importance, 4, 'importance preserved on edit');
 });
 
 test('ui/settings: key validation, active key, normalization', () => {

@@ -3,8 +3,18 @@ import { View, Text, TextInput, Pressable, StyleSheet, SectionList } from 'react
 import { useNavigation } from '@react-navigation/native';
 
 import { useKano } from '../state';
-import { selectNotesList } from '../../src/ui';
+import { selectNotesList, importanceLevel } from '../../src/ui';
 import type { Note } from '../../src/core/notes';
+
+// Short, human date for a note row: "Aug 26" this year, "Aug 26, 2025" otherwise.
+function noteDate(note: Note): string {
+  const raw = note.updatedAt || note.createdAt;
+  const t = raw ? Date.parse(raw) : NaN;
+  if (!Number.isFinite(t)) return '';
+  const d = new Date(t);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) });
+}
 
 export function NotesListScreen() {
   const nav = useNavigation<any>();
@@ -37,16 +47,26 @@ export function NotesListScreen() {
         sections={sections}
         keyExtractor={(item: Note) => item.id}
         renderSectionHeader={({ section }) => <Text style={styles.sectionHeader}>{section.title}</Text>}
-        renderItem={({ item }) => (
-          <Pressable style={styles.row} onPress={() => nav.navigate('NoteEditor', { id: item.id })}>
-            <Text style={styles.rowTitle} numberOfLines={1}>
-              {item.title || 'Untitled'}
-            </Text>
-            <Text style={styles.rowText} numberOfLines={2}>
-              {item.text}
-            </Text>
-          </Pressable>
-        )}
+        renderItem={({ item }) => {
+          const level = importanceLevel(item.importance);
+          const date = noteDate(item);
+          return (
+            <Pressable
+              style={[styles.row, { borderLeftColor: level.color }]}
+              onPress={() => nav.navigate('NoteEditor', { id: item.id })}
+            >
+              <View style={styles.rowHead}>
+                <Text style={styles.rowTitle} numberOfLines={1}>
+                  {item.title || 'Untitled'}
+                </Text>
+                {date ? <Text style={styles.rowDate}>{date}</Text> : null}
+              </View>
+              <Text style={styles.rowText} numberOfLines={2}>
+                {item.text}
+              </Text>
+            </Pressable>
+          );
+        }}
         ListEmptyComponent={<Text style={styles.empty}>No notes yet. Tap + to add one.</Text>}
         contentContainerStyle={sections.length ? undefined : styles.emptyWrap}
       />
@@ -66,8 +86,10 @@ const styles = StyleSheet.create({
   syncBtnText: { color: '#fff', fontWeight: '600' },
   status: { paddingHorizontal: 12, paddingBottom: 8, color: '#555', fontSize: 12 },
   sectionHeader: { paddingHorizontal: 12, paddingVertical: 6, fontWeight: '700', color: '#111', backgroundColor: '#f5f5f5' },
-  row: { paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#eee' },
-  rowTitle: { fontWeight: '600', fontSize: 15, color: '#111' },
+  row: { paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#eee', borderLeftWidth: 4 },
+  rowHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  rowTitle: { fontWeight: '600', fontSize: 15, color: '#111', flexShrink: 1 },
+  rowDate: { color: '#999', fontSize: 12 },
   rowText: { color: '#555', marginTop: 2 },
   empty: { textAlign: 'center', color: '#888', marginTop: 40 },
   emptyWrap: { flexGrow: 1, justifyContent: 'center' },

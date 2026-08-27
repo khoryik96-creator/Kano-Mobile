@@ -6,6 +6,8 @@ export { selectNotesList } from './notesList';
 export type { NotesListQuery, NotesListView } from './notesList';
 export { emptyDraft, noteToDraft, commitDraft, setArchived, deleteNote } from './noteEditor';
 export type { NoteDraft } from './noteEditor';
+export { IMPORTANCE_LEVELS, importanceLevel } from './importance';
+export type { ImportanceLevel } from './importance';
 export { sendOwlMessage } from './owlChat';
 export type { SendOwlInput, SendOwlResult } from './owlChat';
 export {

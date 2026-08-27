@@ -3,7 +3,7 @@ import { View, TextInput, Pressable, Text, StyleSheet, ScrollView, Alert } from 
 import { useNavigation, useRoute } from '@react-navigation/native';
 
 import { useKano } from '../state';
-import { noteToDraft, emptyDraft } from '../../src/ui';
+import { noteToDraft, emptyDraft, IMPORTANCE_LEVELS, importanceLevel } from '../../src/ui';
 
 export function NoteEditorScreen() {
   const nav = useNavigation<any>();
@@ -15,9 +15,10 @@ export function NoteEditorScreen() {
   const initial = existing ? noteToDraft(existing) : emptyDraft();
   const [title, setTitle] = useState(initial.title);
   const [text, setText] = useState(initial.text);
+  const [importance, setImportance] = useState(importanceLevel(initial.importance).value);
 
   const onSave = async () => {
-    await saveNote({ id, title, text });
+    await saveNote({ id, title, text, importance });
     nav.goBack();
   };
 
@@ -40,6 +41,21 @@ export function NoteEditorScreen() {
     <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.form}>
         <TextInput style={styles.title} placeholder="Title" value={title} onChangeText={setTitle} />
+        <Text style={styles.label}>Urgency</Text>
+        <View style={styles.importanceRow}>
+          {IMPORTANCE_LEVELS.map((lvl) => {
+            const on = importance === lvl.value;
+            return (
+              <Pressable
+                key={lvl.value}
+                style={[styles.importanceChip, on && { backgroundColor: lvl.color, borderColor: lvl.color }]}
+                onPress={() => setImportance(lvl.value)}
+              >
+                <Text style={[styles.importanceText, on && styles.importanceTextOn]}>{lvl.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
         <TextInput
           style={styles.body}
           placeholder="Write your note…"
@@ -73,6 +89,11 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#fff' },
   form: { padding: 16, gap: 12 },
   title: { fontSize: 20, fontWeight: '700', borderBottomWidth: 1, borderBottomColor: '#eee', paddingVertical: 8 },
+  label: { color: '#333', fontWeight: '600', fontSize: 13 },
+  importanceRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  importanceChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: '#ddd', backgroundColor: '#f7f7f7' },
+  importanceText: { fontWeight: '600', color: '#333', fontSize: 13 },
+  importanceTextOn: { color: '#fff' },
   body: { fontSize: 16, minHeight: 240, lineHeight: 22 },
   actions: { flexDirection: 'row', gap: 10, padding: 12, borderTopWidth: 1, borderTopColor: '#eee' },
   btn: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 8, backgroundColor: '#f0f0f0' },
