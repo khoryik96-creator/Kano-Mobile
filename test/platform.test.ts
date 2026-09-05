@@ -72,12 +72,12 @@ test('platform: NoteStore normalizes on save (dedupe + newest-first)', async () 
 // the sign-in button every hour, so these lock the refresh path down.
 
 /** A fake token endpoint recording what it was sent. */
-function fakeTokenEndpoint(body: unknown, ok = true) {
+function fakeTokenEndpoint(body: unknown, ok = true, status = ok ? 200 : 400) {
   const calls: { url: string; body: string }[] = [];
   const fetchImpl: FetchLike = async (url, init) => {
     calls.push({ url, body: String(init?.body || '') });
     return {
-      status: ok ? 200 : 400,
+      status,
       ok,
       text: async () => JSON.stringify(body),
       headers: { get: () => null },
@@ -97,11 +97,13 @@ test('platform: sessionExpired treats a nearly-expired token as expired', () => 
 test('platform: refreshGoogleSession exchanges the refresh token and keeps it', async () => {
   const { fetchImpl, calls } = fakeTokenEndpoint({ access_token: 'fresh', expires_in: 3600 });
   const now = 1_000_000;
-  const next = await refreshGoogleSession(
+  const out = await refreshGoogleSession(
     { accessToken: 'stale', expiresAt: now - 1, refreshToken: 'r1', email: 'a@b.c' },
     { clientId: 'cid', fetchImpl },
     now,
   );
+  assert.equal(out.status, 'refreshed');
+  const next = out.status === 'refreshed' ? out.session : null;
   assert.equal(next?.accessToken, 'fresh');
   assert.equal(next?.expiresAt, now + 3600 * 1000);
   assert.equal(next?.refreshToken, 'r1', 'refresh token carried forward when Google omits it');
@@ -111,18 +113,21 @@ test('platform: refreshGoogleSession exchanges the refresh token and keeps it', 
   assert.match(calls[0]!.body, /client_id=cid/);
 });
 
-test('platform: a rejected or unusable refresh yields null, not a bad token', async () => {
-  const rejected = await refreshGoogleSession(
+// The distinction that matters: a revoked grant needs a new sign-in, an unreachable
+// Google does not. Conflating them tells an offline user to sign in and loses a session
+// that was perfectly valid.
+test('platform: a revoked grant is rejected; being offline is only unavailable', async () => {
+  const revoked = await refreshGoogleSession(
     { accessToken: 'stale', expiresAt: 0, refreshToken: 'r1' },
     { clientId: 'cid', fetchImpl: fakeTokenEndpoint({ error: 'invalid_grant' }, false).fetchImpl },
   );
-  assert.equal(rejected, null, 'revoked grant');
+  assert.equal(revoked.status, 'rejected', '400 invalid_grant means re-auth');
 
   const noRefreshToken = await refreshGoogleSession(
     { accessToken: 'stale', expiresAt: 0 },
     { clientId: 'cid', fetchImpl: fakeTokenEndpoint({ access_token: 'x' }).fetchImpl },
   );
-  assert.equal(noRefreshToken, null, 'nothing to refresh with');
+  assert.equal(noRefreshToken.status, 'rejected', 'nothing to refresh with');
 
   const offline: FetchLike = async () => {
     throw new Error('network down');
@@ -131,7 +136,13 @@ test('platform: a rejected or unusable refresh yields null, not a bad token', as
     { accessToken: 'stale', expiresAt: 0, refreshToken: 'r1' },
     { clientId: 'cid', fetchImpl: offline },
   );
-  assert.equal(whenOffline, null, 'transport failure is not a crash');
+  assert.equal(whenOffline.status, 'unavailable', 'a dead network must not kill the session');
+
+  const serverError = await refreshGoogleSession(
+    { accessToken: 'stale', expiresAt: 0, refreshToken: 'r1' },
+    { clientId: 'cid', fetchImpl: fakeTokenEndpoint({ error: 'backend' }, false, 503).fetchImpl },
+  );
+  assert.equal(serverError.status, 'unavailable', 'Google 5xx is transient, not a revocation');
 });
 
 test('platform: the token provider refreshes an expired session and persists it', async () => {

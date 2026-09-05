@@ -28,7 +28,7 @@ const SORTS: { value: NotesSort; label: string }[] = [
 
 export function NotesListScreen() {
   const nav = useNavigation<any>();
-  const { notes, syncNow, archiveNote, removeNote, busy, status } = useKano();
+  const { notes, syncNow, archiveNote, removeNote, syncBusy, status } = useKano();
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState<Tab>('active');
   const [sort, setSort] = useState<NotesSort>('updated');
@@ -65,11 +65,11 @@ export function NotesListScreen() {
           <Text style={styles.brandText}>Kano</Text>
         </View>
         <Pressable
-          style={[styles.syncBtn, busy && styles.syncBtnBusy]}
+          style={[styles.syncBtn, syncBusy && styles.syncBtnBusy]}
           onPress={() => void syncNow()}
-          disabled={busy}
+          disabled={syncBusy}
         >
-          <Text style={styles.syncBtnText}>{busy ? 'Syncing…' : '⟳ Sync'}</Text>
+          <Text style={styles.syncBtnText}>{syncBusy ? 'Syncing…' : '⟳ Sync'}</Text>
         </Pressable>
       </View>
 

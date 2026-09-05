@@ -8,6 +8,7 @@ export { emptyDraft, noteToDraft, commitDraft, setArchived, deleteNote } from '.
 export type { NoteDraft } from './noteEditor';
 export { IMPORTANCE_LEVELS, importanceLevel } from './importance';
 export type { ImportanceLevel } from './importance';
+export { reconcileAfterSync } from './syncReconcile';
 export { sendOwlMessage } from './owlChat';
 export type { SendOwlInput, SendOwlResult } from './owlChat';
 export {
