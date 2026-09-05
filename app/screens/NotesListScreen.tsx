@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, FlatList, Image } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, FlatList, Image, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 
 import { useKano } from '../state';
 import { selectNotesList, importanceLevel } from '../../src/ui';
+import type { NotesSort } from '../../src/ui';
 import { theme, cardShadow } from '../theme';
 import type { Note } from '../../src/core/notes';
 
@@ -19,14 +20,41 @@ function noteDate(note: Note): string {
 
 type Tab = 'active' | 'archived';
 
+const SORTS: { value: NotesSort; label: string }[] = [
+  { value: 'updated', label: 'Recent' },
+  { value: 'urgency', label: 'Urgency' },
+  { value: 'created', label: 'Created' },
+];
+
 export function NotesListScreen() {
   const nav = useNavigation<any>();
-  const { notes, syncNow, busy, status } = useKano();
+  const { notes, syncNow, archiveNote, removeNote, busy, status } = useKano();
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState<Tab>('active');
-  const view = useMemo(() => selectNotesList(notes, { search }), [notes, search]);
+  const [sort, setSort] = useState<NotesSort>('updated');
+  const view = useMemo(() => selectNotesList(notes, { search, sort }), [notes, search, sort]);
 
   const data = tab === 'active' ? view.active : view.archived;
+
+  // Long-press a row for the actions that would otherwise mean opening the note first.
+  const onLongPress = (note: Note) => {
+    Alert.alert(note.title || 'Untitled', undefined, [
+      {
+        text: note.archived ? 'Unarchive' : 'Archive',
+        onPress: () => void archiveNote(note.id, !note.archived),
+      },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () =>
+          Alert.alert('Delete note?', 'This cannot be undone.', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Delete', style: 'destructive', onPress: () => void removeNote(note.id) },
+          ]),
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
 
   return (
     <View style={styles.root}>
@@ -78,6 +106,18 @@ export function NotesListScreen() {
         })}
       </View>
 
+      <View style={styles.sortRow}>
+        <Text style={styles.sortLabel}>Sort</Text>
+        {SORTS.map((s) => {
+          const on = sort === s.value;
+          return (
+            <Pressable key={s.value} style={[styles.sortChip, on && styles.sortChipOn]} onPress={() => setSort(s.value)}>
+              <Text style={[styles.sortChipText, on && styles.sortChipTextOn]}>{s.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
       {status ? <Text style={styles.status}>{status}</Text> : null}
 
       <FlatList
@@ -91,6 +131,8 @@ export function NotesListScreen() {
             <Pressable
               style={[styles.card, cardShadow]}
               onPress={() => nav.navigate('NoteEditor', { id: item.id })}
+              onLongPress={() => onLongPress(item)}
+              delayLongPress={300}
             >
               <View style={[styles.priorityBar, { backgroundColor: level.color }]} />
               <View style={styles.cardBody}>
@@ -177,6 +219,13 @@ const styles = StyleSheet.create({
   segmentItemOn: { backgroundColor: theme.surface, ...cardShadow },
   segmentText: { fontWeight: '700', color: theme.muted, fontSize: 14 },
   segmentTextOn: { color: theme.text },
+
+  sortRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingTop: 10 },
+  sortLabel: { color: theme.faint, fontSize: 12, fontWeight: '700', marginRight: 2 },
+  sortChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: theme.surfaceMuted },
+  sortChipOn: { backgroundColor: theme.primary },
+  sortChipText: { fontSize: 12, fontWeight: '700', color: theme.muted },
+  sortChipTextOn: { color: theme.onPrimary },
 
   status: { paddingHorizontal: 16, paddingTop: 4, color: theme.muted, fontSize: 12 },
 
