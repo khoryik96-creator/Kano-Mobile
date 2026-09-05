@@ -14,7 +14,7 @@ import type { AiProvider } from '../../src/core/ai';
 WebBrowser.maybeCompleteAuthSession();
 
 export function SettingsScreen() {
-  const { settings, updateSettings, completeGoogleSignIn, busy, status } = useKano();
+  const { settings, updateSettings, completeGoogleSignIn, syncBusy, status } = useKano();
   const [provider, setProvider] = useState<AiProvider>(settings.provider);
   const [claudeApiKey, setClaudeApiKey] = useState(settings.claudeApiKey);
   const [deepSeekApiKey, setDeepSeekApiKey] = useState(settings.deepSeekApiKey);
@@ -75,7 +75,7 @@ export function SettingsScreen() {
         <Text style={styles.hint}>Sign in to sync notes with the Kano extension.</Text>
       )}
       {!googleConfigured() ? <Text style={styles.warn}>Set EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID first (see docs/RUNNING_ON_DEVICE.md).</Text> : null}
-      <Pressable style={[styles.btn, styles.primary]} onPress={() => void promptAsync()} disabled={busy || !request || !googleConfigured()}>
+      <Pressable style={[styles.btn, styles.primary]} onPress={() => void promptAsync()} disabled={syncBusy || !request || !googleConfigured()}>
         <Text style={styles.primaryText}>{settings.googleEmail ? 'Re-sign in' : 'Sign in with Google'}</Text>
       </Pressable>
 
@@ -97,7 +97,7 @@ export function SettingsScreen() {
       <Text style={styles.label}>Your name (how The Owl addresses you)</Text>
       <TextInput style={styles.input} placeholder="e.g. Sam" value={userName} onChangeText={setUserName} />
 
-      <Pressable style={[styles.btn, styles.primary, styles.save]} onPress={() => void onSave()} disabled={busy}>
+      <Pressable style={[styles.btn, styles.primary, styles.save]} onPress={() => void onSave()}>
         <Text style={styles.primaryText}>Save settings</Text>
       </Pressable>
       {status ? <Text style={styles.status}>{status}</Text> : null}

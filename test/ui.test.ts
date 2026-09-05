@@ -13,6 +13,7 @@ import {
   normalizeSettings,
   defaultSettings,
   importanceLevel,
+  reconcileAfterSync,
 } from '../src/ui';
 import type { NoteState } from '../src/core/notes';
 import type { AiFetch } from '../src/core/ai';
@@ -162,4 +163,55 @@ test('ui/notesList: sorts by urgency, then newest edit', () => {
   const before = state.notes.map((n) => n.id);
   selectNotesList(state, { sort: 'urgency' });
   assert.deepEqual(state.notes.map((n) => n.id), before, 'input state untouched');
+});
+
+// ── Mid-sync edits must survive ─────────────────────────────────────────────────────
+// A Drive push takes seconds. Everything the user does in that window is already in
+// local storage, so the push result must be reconciled with it, never written over it.
+
+test('ui/syncReconcile: an edit made during the push is not clobbered', () => {
+  let base: NoteState = { notes: [], tombstones: [] };
+  base = commitDraft(base, { title: 'Note', text: 'v1' }, NOW);
+  const id = base.notes[0]!.id;
+
+  // What the (slow) push returned — the state as it was when the push started.
+  const pushed = base;
+  // What local storage holds now: the user edited the same note mid-flight.
+  const latest = commitDraft(base, { id, title: 'Note', text: 'v2 typed during sync' }, LATER);
+
+  const out = reconcileAfterSync(pushed, latest, LATER + 1000);
+  assert.equal(out.notes.length, 1);
+  assert.equal(out.notes[0]!.text, 'v2 typed during sync', 'the newer local edit wins');
+});
+
+test('ui/syncReconcile: a delete made during the push still deletes', () => {
+  let base: NoteState = { notes: [], tombstones: [] };
+  base = commitDraft(base, { title: 'Doomed', text: 'x' }, NOW);
+  const id = base.notes[0]!.id;
+
+  const pushed = base; // push round-trip still carries the note
+  const latest = deleteNote(base, id, LATER); // user deleted it meanwhile
+
+  const out = reconcileAfterSync(pushed, latest, LATER + 1000);
+  assert.equal(out.notes.length, 0, 'the note stays deleted');
+  assert.deepEqual(out.tombstones.map((t) => t.id), [id], 'and the tombstone is kept');
+});
+
+test('ui/syncReconcile: notes pulled by the push are kept, and it is order-safe', () => {
+  let latest: NoteState = { notes: [], tombstones: [] };
+  latest = commitDraft(latest, { title: 'Local', text: 'mine' }, LATER);
+
+  // The push pulled a note written on another device.
+  let pushed: NoteState = { notes: [], tombstones: [] };
+  pushed = commitDraft(pushed, { title: 'FromExtension', text: 'theirs' }, NOW);
+
+  const out = reconcileAfterSync(pushed, latest, LATER + 1000);
+  assert.deepEqual(
+    out.notes.map((n) => n.title).sort(),
+    ['FromExtension', 'Local'],
+    'both sides survive — neither is dropped',
+  );
+
+  // Empty / malformed inputs must not throw.
+  assert.deepEqual(reconcileAfterSync({ notes: [], tombstones: [] }, { notes: [], tombstones: [] }).notes, []);
 });

@@ -5,7 +5,7 @@
 
 export type { SecureStore } from './secureStore';
 export { SECURE_KEYS, InMemorySecureStore } from './secureStore';
-export type { GoogleSession, GoogleAuthClient, GoogleRefreshConfig } from './googleAuth';
+export type { GoogleSession, GoogleAuthClient, GoogleRefreshConfig, RefreshOutcome } from './googleAuth';
 export {
   DRIVE_OAUTH_SCOPES,
   GOOGLE_TOKEN_ENDPOINT,

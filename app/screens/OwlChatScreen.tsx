@@ -8,7 +8,7 @@ import { owlMarkdownToHtml } from '../../src/core/owl';
 import type { OwlMessage } from '../../src/core/owl';
 
 export function OwlChatScreen() {
-  const { owlMessages, ask, clearOwlChat, busy, status } = useKano();
+  const { owlMessages, ask, clearOwlChat, owlBusy, status } = useKano();
   const [input, setInput] = useState('');
   const { width } = useWindowDimensions();
 
@@ -21,7 +21,7 @@ export function OwlChatScreen() {
 
   // The transcript now persists across restarts, so give it an off-switch.
   const onClear = () => {
-    if (!owlMessages.length) return;
+    if (!owlMessages.length || owlBusy) return;
     Alert.alert('Clear chat?', 'This removes the saved conversation on this device.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Clear', style: 'destructive', onPress: () => void clearOwlChat() },
@@ -33,8 +33,8 @@ export function OwlChatScreen() {
       {owlMessages.length ? (
         <View style={styles.bar}>
           <Text style={styles.barCount}>{owlMessages.length} messages</Text>
-          <Pressable onPress={onClear} hitSlop={8}>
-            <Text style={styles.clear}>Clear</Text>
+          <Pressable onPress={onClear} hitSlop={8} disabled={owlBusy}>
+            <Text style={[styles.clear, owlBusy && styles.clearOff]}>Clear</Text>
           </Pressable>
         </View>
       ) : null}
@@ -57,8 +57,8 @@ export function OwlChatScreen() {
       {status ? <Text style={styles.status}>{status}</Text> : null}
       <View style={styles.inputRow}>
         <TextInput style={styles.input} placeholder="Ask The Owl…" value={input} onChangeText={setInput} multiline />
-        <Pressable style={styles.sendBtn} onPress={() => void onSend()} disabled={busy}>
-          <Text style={styles.sendText}>{busy ? '…' : 'Ask'}</Text>
+        <Pressable style={styles.sendBtn} onPress={() => void onSend()} disabled={owlBusy}>
+          <Text style={styles.sendText}>{owlBusy ? '…' : 'Ask'}</Text>
         </Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -79,6 +79,7 @@ const styles = StyleSheet.create({
   },
   barCount: { color: theme.faint, fontSize: 12, fontWeight: '600' },
   clear: { color: theme.primary, fontSize: 13, fontWeight: '700' },
+  clearOff: { color: theme.faint },
   log: { padding: 12, gap: 10 },
   msg: { borderRadius: theme.radius, padding: 12, maxWidth: '92%' },
   user: { alignSelf: 'flex-end', backgroundColor: '#e8e3fd' },

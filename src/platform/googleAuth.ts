@@ -71,20 +71,28 @@ export function sessionExpired(session: GoogleSession | null, now: number = Date
 }
 
 /**
+ * The outcome of a refresh attempt. `rejected` and `unavailable` must not be conflated:
+ * a revoked grant genuinely requires interactive sign-in, whereas a plane-mode phone
+ * still holds a perfectly good refresh token and should simply be retried later. Telling
+ * an offline user to sign in again is a lie that loses their session.
+ */
+export type RefreshOutcome =
+  | { status: 'refreshed'; session: GoogleSession }
+  | { status: 'rejected' }
+  | { status: 'unavailable' };
+
+/**
  * Exchange a refresh token for a fresh access token (RFC 6749 §6). Installed-app
  * clients (our Android OAuth client) have no client secret, so client_id + the refresh
  * token is the whole request. Google usually omits `refresh_token` from the response —
  * the existing one keeps working, so it is carried forward.
- *
- * Returns null when the refresh is rejected (revoked/expired grant), which is the
- * caller's cue to fall back to interactive sign-in.
  */
 export async function refreshGoogleSession(
   session: GoogleSession,
   config: GoogleRefreshConfig,
   now: number = Date.now(),
-): Promise<GoogleSession | null> {
-  if (!session?.refreshToken || !config?.clientId) return null;
+): Promise<RefreshOutcome> {
+  if (!session?.refreshToken || !config?.clientId) return { status: 'rejected' };
   const body = [
     'client_id=' + encodeURIComponent(config.clientId),
     'refresh_token=' + encodeURIComponent(session.refreshToken),
@@ -99,24 +107,30 @@ export async function refreshGoogleSession(
       body,
     });
   } catch {
-    return null; // offline / transport failure — keep the stored session, try later
+    return { status: 'unavailable' }; // offline — the stored session is still good
   }
-  if (!res || !res.ok) return null;
+  if (!res) return { status: 'unavailable' };
+  // 4xx is Google refusing the grant; 5xx is Google having a bad day — only the former
+  // means the session is dead.
+  if (!res.ok) return res.status >= 500 ? { status: 'unavailable' } : { status: 'rejected' };
 
   let parsed: { access_token?: string; expires_in?: number; refresh_token?: string };
   try {
     parsed = JSON.parse(await res.text()) as typeof parsed;
   } catch {
-    return null;
+    return { status: 'unavailable' }; // a truncated body is not a revoked grant
   }
-  if (!parsed?.access_token) return null;
+  if (!parsed?.access_token) return { status: 'rejected' };
 
   const expiresIn = Number(parsed.expires_in || 0) || 3600;
   return {
-    ...session,
-    accessToken: parsed.access_token,
-    expiresAt: now + expiresIn * 1000,
-    refreshToken: parsed.refresh_token || session.refreshToken,
+    status: 'refreshed',
+    session: {
+      ...session,
+      accessToken: parsed.access_token,
+      expiresAt: now + expiresIn * 1000,
+      refreshToken: parsed.refresh_token || session.refreshToken,
+    },
   };
 }
 
@@ -138,10 +152,10 @@ export function createDriveTokenProvider(store: SecureStore, refresh?: GoogleRef
       if (!sessionExpired(session)) return session.accessToken;
 
       if (!refresh?.clientId || !session.refreshToken) return null;
-      const refreshed = await refreshGoogleSession(session, refresh);
-      if (!refreshed) return null;
-      await saveGoogleSession(store, refreshed);
-      return refreshed.accessToken;
+      const outcome = await refreshGoogleSession(session, refresh);
+      if (outcome.status !== 'refreshed') return null;
+      await saveGoogleSession(store, outcome.session);
+      return outcome.session.accessToken;
     },
     async invalidate(): Promise<void> {
       await store.delete(SECURE_KEYS.googleToken);
