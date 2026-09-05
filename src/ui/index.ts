@@ -3,7 +3,7 @@
 // that render these are the device-side remainder. No React or RN imports here.
 
 export { selectNotesList } from './notesList';
-export type { NotesListQuery, NotesListView } from './notesList';
+export type { NotesListQuery, NotesListView, NotesSort } from './notesList';
 export { emptyDraft, noteToDraft, commitDraft, setArchived, deleteNote } from './noteEditor';
 export type { NoteDraft } from './noteEditor';
 export { IMPORTANCE_LEVELS, importanceLevel } from './importance';

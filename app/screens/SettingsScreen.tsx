@@ -27,6 +27,11 @@ export function SettingsScreen() {
     androidClientId: GOOGLE_OAUTH.androidClientId,
     webClientId: GOOGLE_OAUTH.webClientId,
     scopes: ['openid', 'email', ...DRIVE_OAUTH_SCOPES],
+    // Ask for offline access so Google returns a refresh token; without it the access
+    // token dies after ~1h and the user is bounced back to this button. `consent`
+    // guarantees the refresh token is (re)issued rather than silently omitted on a
+    // repeat authorisation — sign-in is a one-off, so the extra prompt costs nothing.
+    extraParams: { access_type: 'offline', prompt: 'consent' },
   });
 
   useEffect(() => {

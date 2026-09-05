@@ -94,6 +94,16 @@ First build takes a while (it compiles the native project). After that, `npm sta
    should appear. Edit it there, pull on the phone — the change should merge without
    losing anything. **This round-trip is the whole point; if it works, the contract holds.**
 5. **Owl tab** → ask a question → you should get a formatted reply with a tiny cost line.
+   Close and reopen the app — the conversation should still be there.
+
+### How syncing behaves day to day
+
+- **You sign in once.** The app asks Google for *offline access*, so it holds a refresh
+  token and renews the hour-long access token silently in the background. You should not
+  be sent back to the sign-in button unless you revoke access or change your password.
+- **It syncs on its own** when the app launches and each time it returns to the
+  foreground (at most once a minute), plus shortly after any note edit. The **Sync**
+  button stays for when you want to force it.
 
 If anything errors on the first run, copy the Metro/red-screen message to me and I'll fix
 it — the JS/TS is written but this is its first execution on a real device.

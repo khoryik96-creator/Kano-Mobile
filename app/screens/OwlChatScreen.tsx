@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, FlatList, useWindowDimensions, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, FlatList, useWindowDimensions, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import RenderHtml from 'react-native-render-html';
 
 import { useKano } from '../state';
+import { theme } from '../theme';
 import { owlMarkdownToHtml } from '../../src/core/owl';
 import type { OwlMessage } from '../../src/core/owl';
 
 export function OwlChatScreen() {
-  const { owlMessages, ask, busy, status } = useKano();
+  const { owlMessages, ask, clearOwlChat, busy, status } = useKano();
   const [input, setInput] = useState('');
   const { width } = useWindowDimensions();
 
@@ -18,8 +19,25 @@ export function OwlChatScreen() {
     await ask(q);
   };
 
+  // The transcript now persists across restarts, so give it an off-switch.
+  const onClear = () => {
+    if (!owlMessages.length) return;
+    Alert.alert('Clear chat?', 'This removes the saved conversation on this device.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear', style: 'destructive', onPress: () => void clearOwlChat() },
+    ]);
+  };
+
   return (
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {owlMessages.length ? (
+        <View style={styles.bar}>
+          <Text style={styles.barCount}>{owlMessages.length} messages</Text>
+          <Pressable onPress={onClear} hitSlop={8}>
+            <Text style={styles.clear}>Clear</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <FlatList
         data={owlMessages}
         keyExtractor={(_m, i) => String(i)}
@@ -48,17 +66,46 @@ export function OwlChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff' },
+  root: { flex: 1, backgroundColor: theme.bg },
+  bar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: theme.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+  },
+  barCount: { color: theme.faint, fontSize: 12, fontWeight: '600' },
+  clear: { color: theme.primary, fontSize: 13, fontWeight: '700' },
   log: { padding: 12, gap: 10 },
-  msg: { borderRadius: 10, padding: 10, maxWidth: '92%' },
-  user: { alignSelf: 'flex-end', backgroundColor: '#e0edff' },
-  assistant: { alignSelf: 'flex-start', backgroundColor: '#f5f5f5' },
-  meta: { fontSize: 11, color: '#666', marginBottom: 4 },
-  userText: { fontSize: 15, color: '#111' },
-  empty: { textAlign: 'center', color: '#888', marginTop: 40, paddingHorizontal: 24 },
-  status: { paddingHorizontal: 12, paddingBottom: 4, color: '#555', fontSize: 12 },
-  inputRow: { flexDirection: 'row', gap: 8, padding: 10, borderTopWidth: 1, borderTopColor: '#eee', alignItems: 'flex-end' },
-  input: { flex: 1, borderWidth: 1, borderColor: '#ddd', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, maxHeight: 120 },
-  sendBtn: { backgroundColor: '#2563eb', borderRadius: 10, paddingHorizontal: 18, paddingVertical: 12 },
-  sendText: { color: '#fff', fontWeight: '700' },
+  msg: { borderRadius: theme.radius, padding: 12, maxWidth: '92%' },
+  user: { alignSelf: 'flex-end', backgroundColor: '#e8e3fd' },
+  assistant: { alignSelf: 'flex-start', backgroundColor: theme.surface },
+  meta: { fontSize: 11, color: theme.faint, marginBottom: 4, fontWeight: '600' },
+  userText: { fontSize: 15, color: theme.text },
+  empty: { textAlign: 'center', color: theme.faint, marginTop: 40, paddingHorizontal: 24, lineHeight: 21 },
+  status: { paddingHorizontal: 12, paddingBottom: 4, color: theme.muted, fontSize: 12 },
+  inputRow: {
+    flexDirection: 'row',
+    gap: 8,
+    padding: 10,
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+    alignItems: 'flex-end',
+    backgroundColor: theme.surface,
+  },
+  input: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: theme.radiusSm,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    maxHeight: 120,
+    color: theme.text,
+  },
+  sendBtn: { backgroundColor: theme.primary, borderRadius: theme.radiusSm, paddingHorizontal: 20, paddingVertical: 12 },
+  sendText: { color: theme.onPrimary, fontWeight: '800' },
 });

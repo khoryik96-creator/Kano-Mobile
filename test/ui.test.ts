@@ -140,3 +140,26 @@ test('ui/owlChat: empty input is refused; provider errors surface a notice', asy
   assert.equal(failed.messages.length, 2);
   assert.match(failed.messages[1]!.text, /Provider\/error notice: .*bad key/);
 });
+
+test('ui/notesList: sorts by urgency, then newest edit', () => {
+  let state: NoteState = { notes: [], tombstones: [] };
+  state = commitDraft(state, { title: 'calm', text: 'a', importance: 1 }, NOW);
+  state = commitDraft(state, { title: 'urgent-old', text: 'b', importance: 4 }, NOW + 1000);
+  state = commitDraft(state, { title: 'urgent-new', text: 'c', importance: 4 }, NOW + 2000);
+
+  const byUrgency = selectNotesList(state, { sort: 'urgency' });
+  assert.deepEqual(
+    byUrgency.active.map((n) => n.title),
+    ['urgent-new', 'urgent-old', 'calm'],
+    'most urgent first, newest edit breaking the tie',
+  );
+
+  // Default ordering is the core's newest-edit-first, untouched.
+  const byUpdated = selectNotesList(state, { sort: 'updated' });
+  assert.equal(byUpdated.active[0]!.title, 'urgent-new');
+
+  // Sorting must not mutate the caller's array.
+  const before = state.notes.map((n) => n.id);
+  selectNotesList(state, { sort: 'urgency' });
+  assert.deepEqual(state.notes.map((n) => n.id), before, 'input state untouched');
+});

@@ -9,8 +9,8 @@ export const theme = {
   surfaceMuted: '#eef1f7',
 
   // Brand
-  primary: '#2f4bff', // Kano blue
-  primaryDark: '#1f36d6',
+  primary: '#6a4fe8', // Kano violet, sampled from the logo artwork
+  primaryDark: '#5439d4',
   onPrimary: '#ffffff',
 
   // Text
