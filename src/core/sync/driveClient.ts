@@ -51,6 +51,17 @@ export class DriveClient {
   }
 
   /**
+   * Forget the remembered notes file. A file id never crosses an account (or OAuth
+   * client) boundary — each Google account has its own appDataFolder — so this must be
+   * called on every sign-in, mirroring the extension clearing driveFileId on login.
+   * Without it, switching accounts kept requesting the OLD account's file id and sync
+   * failed until the app was restarted.
+   */
+  forgetFile(): void {
+    this.cachedFileId = '';
+  }
+
+  /**
    * Authorized Drive fetch. Faithful lift of kanoDriveFetch: attaches the bearer
    * token, resets it on 401/403, surfaces Drive's error message with the HTTP status
    * attached, and parses JSON (falling back to raw text).
@@ -112,7 +123,7 @@ export class DriveClient {
    * kanoDriveDownloadNotesWithMeta: resolve the file id (finding it if needed), then
    * GET `?alt=media`. Returns a null payload when no file exists yet.
    */
-  async downloadNotesWithMeta(): Promise<RemoteNotesState> {
+  async downloadNotesWithMeta(opts: { assertSession?: () => void } = {}): Promise<RemoteNotesState> {
     let fileId = this.cachedFileId;
     if (!fileId) {
       const found = await this.findNotesFile();
@@ -120,9 +131,26 @@ export class DriveClient {
     }
     if (!fileId) return { payload: null, etag: '', fileId: '' };
 
-    const response = (await this.driveFetch(DRIVE_FILES + '/' + encodeURIComponent(fileId) + '?alt=media', {
-      returnMeta: true,
-    })) as DriveFetchMeta;
+    const media = (id: string) =>
+      this.driveFetch(DRIVE_FILES + '/' + encodeURIComponent(id) + '?alt=media', { returnMeta: true }) as Promise<DriveFetchMeta>;
+
+    let response: DriveFetchMeta;
+    try {
+      response = await media(fileId);
+    } catch (error) {
+      // The remembered file is gone (deleted, or recreated by another client under a new
+      // id). Faithful lift of the extension's v4.98.25 recovery: drop the stale id, look
+      // the file up by name once, and read that — rather than failing every sync until
+      // the app restarts. Any other error is a real failure and propagates.
+      if (Number((error as DriveError)?.status || 0) !== 404) throw error;
+      opts.assertSession?.();
+      this.cachedFileId = '';
+      const found = await this.findNotesFile();
+      if (!found?.id) return { payload: null, etag: '', fileId: '' };
+      fileId = found.id;
+      response = await media(fileId);
+    }
+    opts.assertSession?.();
     const payload = response.data && typeof response.data === 'object' ? response.data : null;
     return { payload, etag: String(response.etag || ''), fileId };
   }

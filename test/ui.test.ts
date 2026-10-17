@@ -14,6 +14,9 @@ import {
   defaultSettings,
   importanceLevel,
   reconcileAfterSync,
+  settingsForStorage,
+  restoreSettings,
+  restoreOwlTranscript,
 } from '../src/ui';
 import type { NoteState } from '../src/core/notes';
 import type { AiFetch } from '../src/core/ai';
@@ -214,4 +217,50 @@ test('ui/syncReconcile: notes pulled by the push are kept, and it is order-safe'
 
   // Empty / malformed inputs must not throw.
   assert.deepEqual(reconcileAfterSync({ notes: [], tombstones: [] }, { notes: [], tombstones: [] }).notes, []);
+});
+
+// ── Settings + chat survive a restart ───────────────────────────────────────────────
+
+test('ui/settings: API keys never reach plain storage', () => {
+  const s = { ...defaultSettings(), provider: 'deepseek' as const, deepSeekApiKey: 'sk-secret', claudeApiKey: 'sk-ant-secret' };
+  const stored = JSON.stringify(settingsForStorage(s));
+  assert.ok(!stored.includes('sk-secret') && !stored.includes('sk-ant-secret'), 'keys stay in the keystore only');
+  assert.match(stored, /"provider":"deepseek"/, 'but the provider choice is kept');
+});
+
+test('ui/settings: restore round-trips the provider and keys (the "forgets my key" bug)', () => {
+  const saved = { ...defaultSettings(), provider: 'deepseek' as const, deepSeekApiKey: 'sk-d', userName: 'Kai', owlStream: true };
+  const back = restoreSettings(JSON.stringify(settingsForStorage(saved)), { deepSeekApiKey: 'sk-d', claudeApiKey: null });
+  assert.equal(back.provider, 'deepseek', 'provider is not reset to the Claude default');
+  assert.equal(activeApiKey(back), 'sk-d', 'the active key is the one that was saved');
+  assert.equal(back.userName, 'Kai');
+  assert.equal(back.owlStream, true);
+});
+
+test('ui/settings: restore tolerates missing, corrupt and older-build settings', () => {
+  assert.deepEqual(restoreSettings(null, {}), defaultSettings(), 'first launch');
+  assert.deepEqual(restoreSettings('{not json', {}), defaultSettings(), 'corrupt blob never blocks start-up');
+  const legacy = restoreSettings(JSON.stringify({ provider: 'claude', userName: 'Old' }), { claudeApiKey: 'sk-ant-1' });
+  assert.equal(legacy.owlStream, false, 'a field added later gets its default');
+  assert.equal(legacy.claudeApiKey, 'sk-ant-1');
+});
+
+test('ui/owlChat: a saved transcript restores; damaged entries are dropped, not fatal', () => {
+  const good = [
+    { role: 'user', text: 'hi', ts: '2026-10-01T00:00:00.000Z' },
+    { role: 'assistant', text: 'Hello.', cost: 0.0001, ts: '2026-10-01T00:00:01.000Z' },
+  ];
+  assert.deepEqual(restoreOwlTranscript(JSON.stringify(good)), good);
+
+  const damaged = JSON.stringify([...good, null, { role: 'system', text: 'x' }, { role: 'user' }, { role: 'user', text: '   ' }, 7]);
+  assert.deepEqual(restoreOwlTranscript(damaged), good, 'only well-formed turns survive');
+
+  assert.deepEqual(restoreOwlTranscript(null), []);
+  assert.deepEqual(restoreOwlTranscript('{"truncated'), [], 'a write cut short by a crash yields an empty chat, not a red screen');
+  assert.deepEqual(restoreOwlTranscript('{"role":"user"}'), [], 'not an array');
+
+  const many = Array.from({ length: 80 }, (_, i) => ({ role: 'user', text: 'm' + i }));
+  const restored = restoreOwlTranscript(JSON.stringify(many));
+  assert.equal(restored.length, 50, 'capped to the visible window');
+  assert.equal(restored[49]!.text, 'm79', 'keeping the newest');
 });

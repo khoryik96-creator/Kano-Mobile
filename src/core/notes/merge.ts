@@ -87,7 +87,11 @@ export function mergeNoteState(localNotes: unknown, remotePayload: unknown, loca
     const safeNote: Note = { ...note, id };
     const prev = merged.get(id);
     // `>=` means the record iterated LAST wins a tie; local is iterated after remote.
-    if (!prev || String(safeNote.updatedAt || '') >= String(prev.updatedAt || '')) merged.set(id, safeNote);
+    // Compare instants, not strings (extension v4.98.19+): lexicographic order on
+    // updatedAt only holds while every writer emits the same ISO spelling, so an offset
+    // ("…T09:30:00-05:00") or second-precision timestamp could otherwise let an OLDER
+    // copy overwrite a NEWER edit — and the two clients would disagree on the winner.
+    if (!prev || noteUpdatedMs(safeNote) >= noteUpdatedMs(prev)) merged.set(id, safeNote);
   });
 
   const tombstones = normalizeNoteTombstones(
@@ -110,7 +114,8 @@ export function mergeNoteState(localNotes: unknown, remotePayload: unknown, loca
   });
 
   return {
-    notes: notes.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))),
+    // Same reason as above: order by instant, via the module's own sort.
+    notes: sortNotes(notes),
     tombstones: normalizeNoteTombstones([...tombstoneMap.values()], now),
   };
 }

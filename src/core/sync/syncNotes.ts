@@ -22,7 +22,18 @@ export interface PushOptions {
   savedByVersion?: string;
   /** Frozen clock for deterministic merges/timestamps (default Date.now()). */
   now?: number;
+  /**
+   * Throws if the Google session this sync started under is no longer current. Called
+   * after every download and immediately before every upload — a faithful port of the
+   * extension's kanoRequireCloudSession — so a sync that straddles a sign-in to a
+   * different account stops instead of merging one account's notes into another's
+   * file. Throw CLOUD_SESSION_CHANGED_MESSAGE.
+   */
+  assertSession?: () => void;
 }
+
+/** What assertSession throws when the account changes mid-sync (the extension's wording). */
+export const CLOUD_SESSION_CHANGED_MESSAGE = 'Google account changed during sync. Please sync again.';
 
 export interface PushResult {
   /** The merged state that was uploaded — persist this locally. */
@@ -42,13 +53,14 @@ export interface PushResult {
  * retry converges rather than clobbering the concurrent write.
  */
 export async function pushNotes(client: DriveClient, options: PushOptions): Promise<PushResult> {
-  const { localNotes, localTombstones = [], revision = 0, savedByVersion, now } = options;
+  const { localNotes, localTombstones = [], revision = 0, savedByVersion, now, assertSession } = options;
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= MAX_CONFLICT_RETRIES; attempt++) {
-    const remote = await client.downloadNotesWithMeta();
+    const remote = await client.downloadNotesWithMeta({ assertSession });
     const merged = mergeNoteState(localNotes, remote.payload, localTombstones, now);
     const payload = buildCloudPayload(merged.notes, revision, merged.tombstones, { savedByVersion, now });
+    assertSession?.(); // last check before anything is written
     try {
       const file = await client.uploadNotes(payload, { fileId: remote.fileId, etag: remote.etag });
       return { state: merged, file, revision: Number(revision || 0) || 0 };
@@ -78,8 +90,8 @@ export interface RetrieveResult {
  * store and the raw remote notes/tombstones for reporting.
  */
 export async function retrieveNotes(client: DriveClient, options: PushOptions): Promise<RetrieveResult> {
-  const { localNotes, localTombstones = [], now } = options;
-  const remote = await client.downloadNotesWithMeta();
+  const { localNotes, localTombstones = [], now, assertSession } = options;
+  const remote = await client.downloadNotesWithMeta({ assertSession });
   const remoteNotes = normalizeCloudNotesPayload(remote.payload, now);
   const remoteTombstones = normalizeCloudTombstonesPayload(remote.payload, now);
   const state = mergeNoteState(localNotes, remote.payload, localTombstones, now);

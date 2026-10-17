@@ -12,10 +12,12 @@ export interface SettingsState {
   deepSeekApiKey: string;
   userName: string;
   googleEmail: string;
+  /** Stream Owl replies token-by-token. Off by default, as in the extension. */
+  owlStream: boolean;
 }
 
 export function defaultSettings(): SettingsState {
-  return { provider: 'claude', claudeApiKey: '', deepSeekApiKey: '', userName: '', googleEmail: '' };
+  return { provider: 'claude', claudeApiKey: '', deepSeekApiKey: '', userName: '', googleEmail: '', owlStream: false };
 }
 
 export interface KeyValidation {
@@ -49,5 +51,41 @@ export function normalizeSettings(state: SettingsState): SettingsState {
     deepSeekApiKey: String(state.deepSeekApiKey || '').trim(),
     userName: normalizeOwlUserName(state.userName),
     googleEmail: String(state.googleEmail || '').trim(),
+    owlStream: state.owlStream === true,
   };
+}
+
+/**
+ * The non-secret settings, as written to plain (unencrypted) app storage. API keys are
+ * blanked: they live only in the SecureStore. The single place that decides this, so
+ * no save path can leak a key into AsyncStorage.
+ */
+export function settingsForStorage(state: SettingsState): SettingsState {
+  return { ...normalizeSettings(state), claudeApiKey: '', deepSeekApiKey: '' };
+}
+
+/**
+ * Rebuild settings from what was persisted: plain storage for the non-secret fields,
+ * the SecureStore for the keys. Tolerates a missing or corrupt plain blob (falls back to
+ * defaults) and settings saved by an older build that lack newer fields.
+ */
+export function restoreSettings(
+  rawPlain: string | null,
+  keys: { claudeApiKey?: string | null; deepSeekApiKey?: string | null },
+): SettingsState {
+  let plain: Partial<SettingsState> = {};
+  if (rawPlain) {
+    try {
+      const parsed = JSON.parse(rawPlain);
+      if (parsed && typeof parsed === 'object') plain = parsed as Partial<SettingsState>;
+    } catch {
+      /* corrupt blob — keep defaults rather than failing start-up */
+    }
+  }
+  return normalizeSettings({
+    ...defaultSettings(),
+    ...plain,
+    claudeApiKey: keys.claudeApiKey || '',
+    deepSeekApiKey: keys.deepSeekApiKey || '',
+  });
 }

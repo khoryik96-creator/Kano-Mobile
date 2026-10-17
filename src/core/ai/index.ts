@@ -26,3 +26,12 @@ export {
   callAiText,
   callAiJson,
 } from './client';
+export {
+  AiSseParser,
+  buildStreamingRequest,
+  callAiTextStreaming,
+  STREAM_INTERRUPTED_MESSAGE,
+  STREAM_MAX_TEXT_CHARS,
+  STREAM_MAX_BUFFER_CHARS,
+} from './stream';
+export type { AiStreamRequest, AiStreamCallOptions, AiStreamSink, AiStreamCompletion, AiStreamTransport } from './stream';

@@ -3,8 +3,9 @@ import { AppState } from 'react-native';
 
 import type { NoteState } from '../src/core/notes';
 import type { OwlMessage, OwlPageContext } from '../src/core/owl';
+import { appendOwlMessage, makeOwlMessage } from '../src/core/owl';
 import type { FetchLike } from '../src/core/sync';
-import { DriveClient, pushNotes, retrieveNotes } from '../src/core/sync';
+import { DriveClient, pushNotes, retrieveNotes, CLOUD_SESSION_CHANGED_MESSAGE } from '../src/core/sync';
 import type { AiFetch } from '../src/core/ai';
 import {
   createDriveTokenProvider,
@@ -14,7 +15,7 @@ import {
   EMPTY_NOTE_STATE,
 } from '../src/platform';
 import type { GoogleSession } from '../src/platform';
-import { KeychainSecureStore, AsyncStorageNoteStore } from '../src/platform/native';
+import { KeychainSecureStore, AsyncStorageNoteStore, xhrStreamTransport } from '../src/platform/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GOOGLE_OAUTH } from './config';
 import {
@@ -23,9 +24,12 @@ import {
   deleteNote as uiDeleteNote,
   setArchived as uiSetArchived,
   sendOwlMessage,
+  restoreOwlTranscript,
   activeApiKey,
   normalizeSettings,
   defaultSettings,
+  settingsForStorage,
+  restoreSettings,
   type NoteDraft,
   type SettingsState,
 } from '../src/ui';
@@ -41,6 +45,22 @@ const OWL_KEY = 'kano.owl.v1';
 const FOREGROUND_SYNC_MIN_GAP_MS = 60_000;
 /** Coalesce the bursty syncs that follow save/archive/delete. */
 const EDIT_SYNC_DEBOUNCE_MS = 800;
+/** Repaint a streaming reply at most this often — each repaint re-renders its HTML. */
+const OWL_DRAFT_FLUSH_MS = 80;
+
+/** Run one start-up read in isolation: a failure is reported, never propagated. */
+async function attempt<T>(fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
+  try {
+    return { ok: true, value: await fn() };
+  } catch {
+    return { ok: false };
+  }
+}
+
+export interface SaveResult {
+  ok: boolean;
+  error?: string;
+}
 
 const nativeFetch = fetch as unknown as FetchLike & AiFetch;
 
@@ -66,6 +86,11 @@ interface KanoContextValue {
   notes: NoteState;
   settings: SettingsState;
   owlMessages: OwlMessage[];
+  /**
+   * The reply The Owl is composing right now: the streamed text so far, '' while
+   * waiting for the first token, or null when nothing is in flight / not streaming.
+   */
+  owlDraft: string | null;
   saveNote: (draft: NoteDraft) => Promise<void>;
   removeNote: (id: string) => Promise<void>;
   archiveNote: (id: string, archived: boolean) => Promise<void>;
@@ -73,7 +98,9 @@ interface KanoContextValue {
   completeGoogleSignIn: (session: GoogleSession) => Promise<void>;
   ask: (input: string, pageContext?: OwlPageContext | null) => Promise<void>;
   clearOwlChat: () => Promise<void>;
-  updateSettings: (next: SettingsState) => Promise<void>;
+  /** Save settings. Resolves with what actually reached storage — never fails silently. */
+  updateSettings: (next: SettingsState) => Promise<SaveResult>;
+  setOwlStream: (enabled: boolean) => Promise<void>;
 }
 
 const KanoContext = createContext<KanoContextValue | null>(null);
@@ -89,7 +116,11 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
   const [notes, setNotes] = useState<NoteState>(EMPTY_NOTE_STATE);
   const [settings, setSettings] = useState<SettingsState>(defaultSettings());
   const [owlMessages, setOwlMessages] = useState<OwlMessage[]>([]);
+  const [owlDraft, setOwlDraft] = useState<string | null>(null);
   const revision = useRef(0);
+  // Bumped on every Google sign-in. A sync captures it at start and aborts (before it
+  // writes anything) if it changes — the port of the extension's session identity.
+  const accountEpoch = useRef(0);
   // Sync bookkeeping: `syncing` prevents overlapping Drive round-trips, `pending`
   // remembers that another change landed mid-flight (so we loop once more instead of
   // dropping it), `lastSyncAt` throttles the on-focus sync, `editTimer` debounces the
@@ -103,31 +134,51 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
   // was cleared while the provider was thinking.
   const owlRef = useRef<OwlMessage[]>([]);
   const owlGen = useRef(0);
+  // Only write the transcript once the stored one has been read. If that read failed,
+  // writing would overwrite real history with this session's handful of messages.
+  const owlLoaded = useRef(false);
 
   // ── Load persisted state on first mount ──
+  // Every piece loads on its own. This used to be one try-block, so a single unreadable
+  // keychain entry (Android, after a reinstall) aborted the rest — which is why the Owl
+  // transcript vanished on every restart even though it had been saved.
   useEffect(() => {
     (async () => {
-      try {
-        const cached = await noteStore.load();
-        setNotes(cached);
-        const rawSettings = await AsyncStorage.getItem(SETTINGS_KEY);
-        const base = rawSettings ? { ...defaultSettings(), ...JSON.parse(rawSettings) } : defaultSettings();
-        const claudeApiKey = (await secureStore.get(SECURE_KEYS.claudeApiKey)) || '';
-        const deepSeekApiKey = (await secureStore.get(SECURE_KEYS.deepSeekApiKey)) || '';
-        setSettings(normalizeSettings({ ...base, claudeApiKey, deepSeekApiKey }));
-        const rawOwl = await AsyncStorage.getItem(OWL_KEY);
-        if (rawOwl) {
-          const parsed = JSON.parse(rawOwl);
-          if (Array.isArray(parsed)) {
-            owlRef.current = parsed as OwlMessage[];
-            setOwlMessages(parsed as OwlMessage[]);
-          }
-        }
-      } catch (e) {
-        setStatus('Load failed: ' + String((e as Error)?.message || e));
-      } finally {
-        setReady(true);
+      const failed: string[] = [];
+
+      const cached = await attempt(() => noteStore.load());
+      if (cached.ok) setNotes(cached.value);
+      else failed.push('notes');
+
+      const plain = await attempt(() => AsyncStorage.getItem(SETTINGS_KEY));
+      if (!plain.ok) failed.push('settings');
+      const claude = await attempt(() => secureStore.get(SECURE_KEYS.claudeApiKey));
+      const deepSeek = await attempt(() => secureStore.get(SECURE_KEYS.deepSeekApiKey));
+      setSettings(
+        restoreSettings(plain.ok ? plain.value : null, {
+          claudeApiKey: claude.ok ? claude.value : null,
+          deepSeekApiKey: deepSeek.ok ? deepSeek.value : null,
+        }),
+      );
+
+      const owl = await attempt(() => AsyncStorage.getItem(OWL_KEY));
+      if (owl.ok) {
+        const restored = restoreOwlTranscript(owl.value);
+        owlRef.current = restored;
+        setOwlMessages(restored);
+        owlLoaded.current = true;
+      } else {
+        failed.push('chat history');
       }
+
+      if (failed.length) {
+        setStatus(
+          "Couldn't load " +
+            failed.join(', ') +
+            (owl.ok ? '' : ". This conversation won't be saved until the app restarts."),
+        );
+      }
+      setReady(true);
     })();
   }, []);
 
@@ -176,6 +227,11 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
         setSyncBusy(true);
         if (!silent) setStatus('Syncing…');
 
+        const epoch = accountEpoch.current;
+        const assertSession = () => {
+          if (accountEpoch.current !== epoch) throw new Error(CLOUD_SESSION_CHANGED_MESSAGE);
+        };
+
         do {
           pendingSync.current = false;
           const before = await noteStore.load();
@@ -184,7 +240,9 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
             localTombstones: before.tombstones,
             revision: ++revision.current,
             now: Date.now(),
+            assertSession,
           });
+          assertSession(); // a sign-in during the upload: don't keep the old account's merge
 
           // The push took real time. Anything the user saved, archived or deleted while
           // it was in flight is already in the store, and writing `result.state` over
@@ -280,6 +338,13 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
     async (session: GoogleSession) => {
       setSyncBusy(true);
       setStatus('Signing in…');
+      // A new sign-in is a new account boundary, even for the same account: any sync
+      // still running under the old session aborts at its next checkpoint, and the
+      // remembered Drive file id (which never crosses accounts) is forgotten so the
+      // file is rediscovered in this account's appDataFolder.
+      accountEpoch.current += 1;
+      const epoch = accountEpoch.current;
+      driveClient.forgetFile();
       try {
         await saveGoogleSession(secureStore, session);
         const cache = await noteStore.load();
@@ -287,23 +352,47 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
           localNotes: cache.notes,
           localTombstones: cache.tombstones,
           now: Date.now(),
+          assertSession: () => {
+            if (accountEpoch.current !== epoch) throw new Error(CLOUD_SESSION_CHANGED_MESSAGE);
+          },
         });
-        await persistNotes(merged.state);
+        await persistNotes(reconcileAfterSync(merged.state, await noteStore.load(), Date.now()));
         const next = normalizeSettings({ ...settings, googleEmail: session.email || '' });
         setSettings(next);
-        await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...next, claudeApiKey: '', deepSeekApiKey: '' }));
+        try {
+          await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settingsForStorage(next)));
+        } catch {
+          /* the session itself is in the keychain; only the email label is lost */
+        }
         setStatus('Signed in' + (session.email ? ' · ' + session.email : ''));
+        // Push this device's notes into the account just connected (and redo any sync
+        // the sign-in interrupted).
+        scheduleSync();
       } catch (e) {
         setStatus('Sign-in failed: ' + String((e as Error)?.message || e));
       } finally {
         setSyncBusy(false);
       }
     },
-    [persistNotes, settings],
+    [persistNotes, settings, scheduleSync],
   );
+
+  // Write the transcript, if it is safe to. Returns whether it reached storage.
+  const persistOwl = useCallback(async (messages: OwlMessage[], gen: number): Promise<boolean> => {
+    if (!owlLoaded.current || gen !== owlGen.current) return false;
+    try {
+      if (messages.length) await AsyncStorage.setItem(OWL_KEY, JSON.stringify(messages));
+      else await AsyncStorage.removeItem(OWL_KEY);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
 
   const ask = useCallback(
     async (input: string, pageContext: OwlPageContext | null = null) => {
+      const question = String(input || '').trim();
+      if (!question) return;
       const provider = settings.provider;
       const apiKey = activeApiKey(settings);
       if (!apiKey) {
@@ -315,55 +404,141 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
       // provider is thinking, this reply belongs to a conversation that no longer
       // exists and must not resurrect it.
       const gen = owlGen.current;
-      const result = await sendOwlMessage({
-        messages: owlRef.current,
-        input,
-        provider,
-        apiKey,
-        fetchImpl: nativeFetch,
-        userName: settings.userName,
-        pageContext,
-      });
+      const history = owlRef.current;
+
+      // Show — and save — the question straight away. It used to appear only once the
+      // whole reply was back, and was gone if the app closed in the meantime.
+      const shown = appendOwlMessage(history, makeOwlMessage('user', question));
+      owlRef.current = shown;
+      setOwlMessages(shown);
+      void persistOwl(shown, gen);
+
+      // Streaming: repaint the growing reply, throttled.
+      const streaming = settings.owlStream;
+      setOwlDraft(streaming ? '' : null);
+      let latest = '';
+      let flush: ReturnType<typeof setTimeout> | null = null;
+      const onText = (text: string) => {
+        latest = text;
+        if (flush) return;
+        flush = setTimeout(() => {
+          flush = null;
+          if (gen === owlGen.current) setOwlDraft(latest);
+        }, OWL_DRAFT_FLUSH_MS);
+      };
+
+      let result;
+      try {
+        // sendOwlMessage appends the user turn itself and never throws: a provider
+        // failure comes back as a "Provider/error notice" reply.
+        result = await sendOwlMessage({
+          messages: history,
+          input: question,
+          provider,
+          apiKey,
+          fetchImpl: nativeFetch,
+          userName: settings.userName,
+          pageContext,
+          stream: streaming ? { transport: xhrStreamTransport, onText } : undefined,
+        });
+      } finally {
+        if (flush) clearTimeout(flush);
+        setOwlDraft(null);
+      }
+
       if (gen !== owlGen.current) {
         setOwlBusy(false); // chat was cleared mid-flight — drop this reply
         return;
       }
       // sendOwlMessage already caps the visible transcript (OWL_MAX_VISIBLE_MESSAGES).
-      const trimmed = result.messages;
-      owlRef.current = trimmed;
-      setOwlMessages(trimmed);
-      // Persist the transcript so the conversation survives an app restart.
-      try {
-        await AsyncStorage.setItem(OWL_KEY, JSON.stringify(trimmed));
-      } catch {
-        /* a failed transcript write must not break the reply */
-      }
-      setStatus(result.ok ? 'The Owl replied' + (result.cost ? ' · $' + result.cost.toFixed(6) : '') : result.error || '');
+      const finished = result.messages;
+      owlRef.current = finished;
+      setOwlMessages(finished);
+
+      // A completed reply is never thrown away because storage hiccupped: it stays on
+      // screen, and the next successful write (which saves the whole transcript)
+      // catches it up.
+      const saved = await persistOwl(finished, gen);
+      const outcome = result.ok
+        ? 'The Owl replied' + (result.cost ? ' · $' + result.cost.toFixed(6) : '')
+        : result.error || '';
+      setStatus(saved || !owlLoaded.current ? outcome : outcome + " · couldn't save chat history on this device");
       setOwlBusy(false);
     },
-    [settings],
+    [settings, persistOwl],
   );
 
   const clearOwlChat = useCallback(async () => {
     owlGen.current += 1; // invalidates any reply still in flight
     owlRef.current = [];
     setOwlMessages([]);
-    await AsyncStorage.removeItem(OWL_KEY);
-    setStatus('Chat cleared');
+    setOwlDraft(null);
+    try {
+      await AsyncStorage.removeItem(OWL_KEY);
+      setStatus('Chat history cleared');
+    } catch {
+      setStatus("Chat cleared here, but the saved copy couldn't be removed. Try again.");
+    }
   }, []);
 
-  const updateSettings = useCallback(async (next: SettingsState) => {
+  // Each part is written independently, and the keys are read back. A settings save
+  // used to stop at its first error (Android refuses to store an empty secret, i.e. the
+  // key for the provider you don't use) and report nothing — so the key you DID enter
+  // looked saved until the app closed.
+  const updateSettings = useCallback(async (next: SettingsState): Promise<SaveResult> => {
     const normalized = normalizeSettings(next);
     setSettings(normalized);
-    await secureStore.set(SECURE_KEYS.claudeApiKey, normalized.claudeApiKey);
-    await secureStore.set(SECURE_KEYS.deepSeekApiKey, normalized.deepSeekApiKey);
-    await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...normalized, claudeApiKey: '', deepSeekApiKey: '' }));
+    const failed: string[] = [];
+
+    try {
+      await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settingsForStorage(normalized)));
+    } catch {
+      failed.push('preferences');
+    }
+    const secrets: [string, string, string][] = [
+      ['Claude key', SECURE_KEYS.claudeApiKey, normalized.claudeApiKey],
+      ['DeepSeek key', SECURE_KEYS.deepSeekApiKey, normalized.deepSeekApiKey],
+    ];
+    for (const [label, key, value] of secrets) {
+      try {
+        await secureStore.set(key, value);
+        if (((await secureStore.get(key)) || '') !== value) failed.push(label);
+      } catch {
+        failed.push(label);
+      }
+    }
+
+    if (failed.length) {
+      const error = "Couldn't save the " + failed.join(' and ') + ' on this device — it will be lost when the app closes.';
+      setStatus(error);
+      return { ok: false, error };
+    }
     setStatus('Settings saved');
+    return { ok: true };
   }, []);
 
+  const setOwlStream = useCallback(
+    async (enabled: boolean) => {
+      const next = normalizeSettings({ ...settings, owlStream: enabled });
+      setSettings(next);
+      try {
+        await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settingsForStorage(next)));
+      } catch {
+        setStatus("Couldn't save the streaming preference");
+      }
+    },
+    [settings],
+  );
+
   const value = useMemo<KanoContextValue>(
-    () => ({ ready, busy, syncBusy, owlBusy, status, notes, settings, owlMessages, saveNote, removeNote, archiveNote, syncNow, completeGoogleSignIn, ask, clearOwlChat, updateSettings }),
-    [ready, busy, syncBusy, owlBusy, status, notes, settings, owlMessages, saveNote, removeNote, archiveNote, syncNow, completeGoogleSignIn, ask, clearOwlChat, updateSettings],
+    () => ({
+      ready, busy, syncBusy, owlBusy, status, notes, settings, owlMessages, owlDraft,
+      saveNote, removeNote, archiveNote, syncNow, completeGoogleSignIn, ask, clearOwlChat, updateSettings, setOwlStream,
+    }),
+    [
+      ready, busy, syncBusy, owlBusy, status, notes, settings, owlMessages, owlDraft,
+      saveNote, removeNote, archiveNote, syncNow, completeGoogleSignIn, ask, clearOwlChat, updateSettings, setOwlStream,
+    ],
   );
 
   return <KanoContext.Provider value={value}>{children}</KanoContext.Provider>;

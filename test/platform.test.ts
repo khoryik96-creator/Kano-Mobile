@@ -166,3 +166,18 @@ test('platform: without a refresh config an expired session still reports signed
   const provider = createDriveTokenProvider(store); // no client id configured
   assert.equal(await provider.getAccessToken(), null);
 });
+
+// ── Empty secrets ───────────────────────────────────────────────────────────────────
+// Android's keystore rejects an empty value, so "no key for the provider I don't use"
+// must mean *delete*, never *store ""* — storing "" threw and aborted the whole settings
+// save, which is why a saved API key didn't survive closing the app.
+
+test('platform: setting an empty secret removes it rather than storing ""', async () => {
+  const s = new InMemorySecureStore();
+  await s.set('k', 'sk-live');
+  assert.equal(await s.get('k'), 'sk-live');
+  await s.set('k', '');
+  assert.equal(await s.get('k'), null, 'empty means absent');
+  await s.set('never-set', ''); // must be a harmless no-op, not an error
+  assert.equal(await s.get('never-set'), null);
+});

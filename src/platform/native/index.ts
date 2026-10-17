@@ -5,3 +5,4 @@
 
 export { KeychainSecureStore } from './secureStoreKeychain';
 export { AsyncStorageNoteStore } from './noteStoreAsyncStorage';
+export { xhrStreamTransport } from './aiStreamXhr';

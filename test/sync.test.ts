@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DriveClient, pushNotes, retrieveNotes, inspectCloud } from '../src/core/sync';
+import { DriveClient, pushNotes, retrieveNotes, inspectCloud, CLOUD_SESSION_CHANGED_MESSAGE, KANO_NOTE_CLOUD_FILE_NAME } from '../src/core/sync';
 import type { FetchLike, TokenProvider, DriveResponse, DriveRequestInit } from '../src/core/sync';
 
 // Offline integration test for core/sync.
@@ -70,6 +70,14 @@ class FakeDrive {
     return this.files.get(id);
   }
 
+  /** Delete a file outright (e.g. the user reset Drive, or another client recreated it). */
+  remove(id: string): void {
+    this.files.delete(id);
+  }
+
+  /** How many times each kind of request was made — lets tests assert "exactly once". */
+  calls = { find: 0, download: 0, upload: 0 };
+
   private meta(f: StoredFile): string {
     return JSON.stringify({ id: f.id, name: f.name, modifiedTime: new Date(NOW).toISOString(), size: String(f.content.length), version: String(f.version) });
   }
@@ -80,6 +88,7 @@ class FakeDrive {
 
     // ── Upload (create or update) ──
     if (url.includes(UPLOAD_MARKER)) {
+      this.calls.upload++;
       const { metadata, payload } = parseMultipart(String(init.body || ''), init.headers?.['Content-Type'] || '');
       const patchId = (url.match(/files\/([^?]+)\?/) || [])[1];
       if (method === 'PATCH' && patchId) {
@@ -109,6 +118,7 @@ class FakeDrive {
 
     // ── Download by id (alt=media) ──
     if (url.includes('alt=media')) {
+      this.calls.download++;
       const id = decodeURIComponent((url.match(/files\/([^?]+)\?/) || [])[1] || '');
       const f = this.files.get(id);
       if (!f) return makeResponse(404, JSON.stringify({ error: { message: 'not found' } }));
@@ -117,6 +127,7 @@ class FakeDrive {
 
     // ── Find by name in appDataFolder ──
     if (url.includes(`${DRIVE_FILES}?`) || url.includes('spaces=appDataFolder')) {
+      this.calls.find++;
       const q = new URL(url).searchParams.get('q') || '';
       const nameRaw = (q.match(/name='((?:\\.|[^'])*)'/) || [])[1] || '';
       const name = nameRaw.replace(/\\'/g, "'").replace(/\\\\/g, '\\');
@@ -272,4 +283,78 @@ test('sync: an empty token is refused up front', async () => {
   const drive = new FakeDrive();
   const client = new DriveClient(drive.fetch, { getAccessToken: () => '' });
   await assert.rejects(() => client.downloadNotesWithMeta(), /Google session expired/);
+});
+
+// ── Hardening ported from extension v4.98.25: stale file ids + account switches ────────
+
+const NOTE = (id: string, title: string, at: string) => ({
+  id, title, text: title, html: '', createdAt: at, updatedAt: at, importance: 2, archived: false, archivedAt: '',
+});
+
+test('sync: a remembered file that 404s is rediscovered by name, once', async () => {
+  const drive = new FakeDrive();
+  const oldId = drive.seed(KANO_NOTE_CLOUD_FILE_NAME, { schemaVersion: 3, notes: [NOTE('a', 'old', '2026-08-01T00:00:00.000Z')] });
+  const client = new DriveClient(drive.fetch, staticToken());
+  await client.downloadNotesWithMeta(); // remembers oldId
+  assert.equal(client.fileId, oldId);
+
+  // Another client recreates the file under a new id.
+  drive.remove(oldId);
+  const newId = drive.seed(KANO_NOTE_CLOUD_FILE_NAME, { schemaVersion: 3, notes: [NOTE('b', 'new', '2026-08-02T00:00:00.000Z')] });
+  drive.calls = { find: 0, download: 0, upload: 0 };
+
+  const remote = await client.downloadNotesWithMeta();
+  assert.equal(remote.fileId, newId, 'found the replacement instead of failing');
+  assert.equal(client.fileId, newId, 'and remembers it from now on');
+  assert.equal((remote.payload as any).notes[0].title, 'new');
+  assert.deepEqual(drive.calls, { find: 1, download: 2, upload: 0 }, 'one failed read, one lookup, one good read — no loop');
+});
+
+test('sync: a 404 with no replacement file reads as "no cloud notes yet"', async () => {
+  const drive = new FakeDrive();
+  const id = drive.seed(KANO_NOTE_CLOUD_FILE_NAME, { schemaVersion: 3, notes: [] });
+  const client = new DriveClient(drive.fetch, staticToken());
+  await client.downloadNotesWithMeta();
+  drive.remove(id);
+  const remote = await client.downloadNotesWithMeta();
+  assert.deepEqual(remote, { payload: null, etag: '', fileId: '' });
+});
+
+test('sync: forgetFile makes the next read rediscover — required on every sign-in', async () => {
+  const drive = new FakeDrive();
+  drive.seed(KANO_NOTE_CLOUD_FILE_NAME, { schemaVersion: 3, notes: [] });
+  const client = new DriveClient(drive.fetch, staticToken());
+  await client.downloadNotesWithMeta();
+  drive.calls = { find: 0, download: 0, upload: 0 };
+  client.forgetFile();
+  assert.equal(client.fileId, '');
+  await client.downloadNotesWithMeta();
+  assert.equal(drive.calls.find, 1, 'looked the file up again rather than trusting a cross-account id');
+});
+
+test('sync: a push that straddles an account switch aborts before writing anything', async () => {
+  const drive = new FakeDrive();
+  const id = drive.seed(KANO_NOTE_CLOUD_FILE_NAME, { schemaVersion: 3, notes: [NOTE('a', 'cloud', '2026-08-01T00:00:00.000Z')] });
+  const before = drive.get(id)!.content;
+
+  let accountEpoch = 0;
+  const started = accountEpoch;
+  const assertSession = () => {
+    if (accountEpoch !== started) throw new Error(CLOUD_SESSION_CHANGED_MESSAGE);
+  };
+  // The user signs in to another account while the download is in flight.
+  const realFetch = drive.fetch;
+  drive.fetch = async (url, init) => {
+    const res = await realFetch(url, init);
+    if (url.includes('alt=media')) accountEpoch++;
+    return res;
+  };
+  const switching = new DriveClient(drive.fetch, staticToken());
+
+  await assert.rejects(
+    pushNotes(switching, { localNotes: [NOTE('b', 'local', '2026-08-02T00:00:00.000Z')], assertSession, now: NOW }),
+    { message: CLOUD_SESSION_CHANGED_MESSAGE },
+  );
+  assert.equal(drive.calls.upload, 0, 'nothing was uploaded');
+  assert.equal(drive.get(id)!.content, before, 'the cloud file is untouched');
 });

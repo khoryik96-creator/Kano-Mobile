@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 
 import { KanoProvider } from './app/state';
 import { RootNavigator } from './app/navigation';
+import { LoadingGate } from './app/LoadingGate';
 
 // react-native-render-html (used to render Owl replies) still calls React's deprecated
 // `defaultProps` on function/memo components. React logs a "Support for defaultProps
@@ -32,7 +33,9 @@ export default function App() {
     <SafeAreaProvider>
       <KanoProvider>
         <StatusBar style="auto" />
-        <RootNavigator />
+        <LoadingGate>
+          <RootNavigator />
+        </LoadingGate>
       </KanoProvider>
     </SafeAreaProvider>
   );
