@@ -67,7 +67,7 @@ export async function pushNotes(client: DriveClient, options: PushOptions): Prom
     const payload = buildCloudPayload(merged.notes, revision, merged.tombstones, { savedByVersion, now });
     assertSession?.(); // last check before anything is written
     try {
-      const file = await client.uploadNotes(payload, { fileId: remote.fileId, etag: remote.etag });
+      const file = await client.uploadNotes(payload, { fileId: remote.fileId, etag: remote.etag }, { assertSession });
       return { state: merged, file, revision: Number(revision || 0) || 0 };
     } catch (e) {
       lastError = e;

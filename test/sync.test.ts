@@ -358,3 +358,31 @@ test('sync: a push that straddles an account switch aborts before writing anythi
   assert.equal(drive.calls.upload, 0, 'nothing was uploaded');
   assert.equal(drive.get(id)!.content, before, 'the cloud file is untouched');
 });
+
+test('sync: a sign-in that lands while the upload fetches its token stops the request going out', async () => {
+  // Account A has no cloud file yet, so this push would CREATE one. If the session
+  // changes between "token obtained" and "request issued", that POST could land in the
+  // new account's Drive, next to the file it already has.
+  const drive = new FakeDrive();
+  let epoch = 0;
+  let tokenCalls = 0;
+  const tokens: TokenProvider = {
+    async getAccessToken() {
+      tokenCalls++;
+      if (tokenCalls === 2) epoch++; // the upload's token fetch: sign-in completes meanwhile
+      return 'tok';
+    },
+  };
+  const started = epoch;
+  const assertSession = () => {
+    if (epoch !== started) throw new Error(CLOUD_SESSION_CHANGED_MESSAGE);
+  };
+
+  await assert.rejects(
+    pushNotes(new DriveClient(drive.fetch, tokens), { localNotes: [NOTE('a', 'mine', '2026-08-01T00:00:00.000Z')], assertSession, now: NOW }),
+    { message: CLOUD_SESSION_CHANGED_MESSAGE },
+  );
+  assert.equal(tokenCalls, 2, 'reached the upload');
+  assert.equal(drive.calls.upload, 0, 'but no request was issued');
+  assert.equal(drive.calls.find, 1);
+});
