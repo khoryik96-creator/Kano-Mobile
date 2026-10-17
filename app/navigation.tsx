@@ -2,7 +2,8 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { Image } from 'react-native';
+import type { ImageSourcePropType } from 'react-native';
 
 import { NotesListScreen } from './screens/NotesListScreen';
 import { NoteEditorScreen } from './screens/NoteEditorScreen';
@@ -17,18 +18,19 @@ const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 // Tab icons. Without a tabBarIcon, React Navigation draws its placeholder "missing icon"
-// box. Filled when the tab is active, outline when not. @expo/vector-icons ships with
-// the `expo` package, so this adds no dependency.
-type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
-function tabIcon(active: IconName, inactive: IconName = active) {
+// box. Filled when the tab is active, outline when not. These are Material Design
+// Icons (Apache-2.0) pre-rendered to PNG at 1x/2x/3x and tinted at runtime: an icon
+// FONT (@expo/vector-icons) would need the expo-font native package, which this
+// project doesn't ship — that broke the build's JS bundle step.
+function tabIcon(active: ImageSourcePropType, inactive: ImageSourcePropType = active) {
   function TabIcon({ focused, color, size }: { focused: boolean; color: string; size: number }) {
-    return <MaterialCommunityIcons name={focused ? active : inactive} color={color} size={size} />;
+    return <Image source={focused ? active : inactive} style={{ width: size, height: size, tintColor: color }} />;
   }
   return TabIcon;
 }
-const NotesIcon = tabIcon('note-text', 'note-text-outline');
-const OwlIcon = tabIcon('owl');
-const SettingsIcon = tabIcon('cog', 'cog-outline');
+const NotesIcon = tabIcon(require('../assets/tab/notes.png'), require('../assets/tab/notes-outline.png'));
+const OwlIcon = tabIcon(require('../assets/tab/owl.png'));
+const SettingsIcon = tabIcon(require('../assets/tab/settings.png'), require('../assets/tab/settings-outline.png'));
 
 function NotesStack() {
   return (
