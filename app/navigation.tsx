@@ -2,6 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { NotesListScreen } from './screens/NotesListScreen';
 import { NoteEditorScreen } from './screens/NoteEditorScreen';
@@ -14,6 +15,20 @@ import { theme } from './theme';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+
+// Tab icons. Without a tabBarIcon, React Navigation draws its placeholder "missing icon"
+// box. Filled when the tab is active, outline when not. @expo/vector-icons ships with
+// the `expo` package, so this adds no dependency.
+type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+function tabIcon(active: IconName, inactive: IconName = active) {
+  function TabIcon({ focused, color, size }: { focused: boolean; color: string; size: number }) {
+    return <MaterialCommunityIcons name={focused ? active : inactive} color={color} size={size} />;
+  }
+  return TabIcon;
+}
+const NotesIcon = tabIcon('note-text', 'note-text-outline');
+const OwlIcon = tabIcon('owl');
+const SettingsIcon = tabIcon('cog', 'cog-outline');
 
 function NotesStack() {
   return (
@@ -44,9 +59,9 @@ export function RootNavigator() {
           headerTintColor: theme.primary,
         }}
       >
-        <Tab.Screen name="NotesTab" component={NotesStack} options={{ title: 'Notes', headerShown: false }} />
-        <Tab.Screen name="Owl" component={OwlChatScreen} options={{ title: 'The Owl' }} />
-        <Tab.Screen name="Settings" component={SettingsScreen} />
+        <Tab.Screen name="NotesTab" component={NotesStack} options={{ title: 'Notes', headerShown: false, tabBarIcon: NotesIcon }} />
+        <Tab.Screen name="Owl" component={OwlChatScreen} options={{ title: 'The Owl', tabBarIcon: OwlIcon }} />
+        <Tab.Screen name="Settings" component={SettingsScreen} options={{ tabBarIcon: SettingsIcon }} />
       </Tab.Navigator>
     </NavigationContainer>
   );

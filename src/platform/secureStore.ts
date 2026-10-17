@@ -5,7 +5,18 @@
 // to, and InMemorySecureStore backs the Node tests.
 
 export interface SecureStore {
+  /**
+   * The stored value, or null when absent. REJECTS when a value exists but can't be
+   * read (e.g. an Android keystore entry orphaned by a reinstall). Callers must not
+   * treat that as "absent": a key that merely failed to load must never be overwritten
+   * or deleted on the strength of an empty Settings box.
+   */
   get(key: string): Promise<string | null>;
+  /**
+   * Store a value. Setting an empty value REMOVES the key: "no Claude key" is the
+   * absence of one, not an empty secret. (Android's keystore rejects empty values
+   * outright, so this is also what keeps a save from failing half-way through.)
+   */
   set(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
 }
@@ -25,7 +36,8 @@ export class InMemorySecureStore implements SecureStore {
     return this.map.has(key) ? (this.map.get(key) as string) : null;
   }
   async set(key: string, value: string): Promise<void> {
-    this.map.set(key, value);
+    if (!value) this.map.delete(key);
+    else this.map.set(key, value);
   }
   async delete(key: string): Promise<void> {
     this.map.delete(key);

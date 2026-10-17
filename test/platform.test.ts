@@ -10,6 +10,7 @@ import {
   refreshGoogleSession,
   sessionExpired,
   GOOGLE_TOKEN_ENDPOINT,
+  UNREADABLE_SESSION_MESSAGE,
   InMemoryNoteStore,
 } from '../src/platform';
 import type { FetchLike } from '../src/core/sync';
@@ -165,4 +166,74 @@ test('platform: without a refresh config an expired session still reports signed
   await saveGoogleSession(store, { accessToken: 'stale', expiresAt: Date.now() - 1000, refreshToken: 'r1' });
   const provider = createDriveTokenProvider(store); // no client id configured
   assert.equal(await provider.getAccessToken(), null);
+});
+
+// ── Empty secrets ───────────────────────────────────────────────────────────────────
+// Android's keystore rejects an empty value, so "no key for the provider I don't use"
+// must mean *delete*, never *store ""* — storing "" threw and aborted the whole settings
+// save, which is why a saved API key didn't survive closing the app.
+
+test('platform: setting an empty secret removes it rather than storing ""', async () => {
+  const s = new InMemorySecureStore();
+  await s.set('k', 'sk-live');
+  assert.equal(await s.get('k'), 'sk-live');
+  await s.set('k', '');
+  assert.equal(await s.get('k'), null, 'empty means absent');
+  await s.set('never-set', ''); // must be a harmless no-op, not an error
+  assert.equal(await s.get('never-set'), null);
+});
+
+// ── Refresh vs. a concurrent sign-in ────────────────────────────────────────────────
+// A refresh is a network round-trip. If the user signs in (perhaps to another account)
+// while it is in flight, the refresh must not land afterwards and put the OLD
+// account's session back over the new one.
+
+test('platform: a refresh that finishes after a new sign-in does not overwrite it', async () => {
+  const store = new InMemorySecureStore();
+  await saveGoogleSession(store, { accessToken: 'A-stale', expiresAt: Date.now() - 1000, refreshToken: 'rA', email: 'a@x' });
+  const signedInB = { accessToken: 'B-fresh', expiresAt: Date.now() + 60 * 60_000, refreshToken: 'rB', email: 'b@x' };
+
+  // The token endpoint is slow: account B's sign-in completes while it is answering.
+  const fetchImpl: FetchLike = async () => {
+    await saveGoogleSession(store, signedInB);
+    return {
+      status: 200,
+      ok: true,
+      text: async () => JSON.stringify({ access_token: 'A-refreshed', expires_in: 3600 }),
+      headers: { get: () => null },
+    };
+  };
+  const provider = createDriveTokenProvider(store, { clientId: 'cid', fetchImpl });
+
+  assert.equal(await provider.getAccessToken(), 'B-fresh', "hands back the session that's actually stored now");
+  assert.equal((await loadGoogleSession(store))?.email, 'b@x', "B's sign-in survives — A did not overwrite it");
+  assert.equal((await loadGoogleSession(store))?.accessToken, 'B-fresh');
+});
+
+test('platform: two overlapping refreshes of the same session save once, agree on the token', async () => {
+  const store = new InMemorySecureStore();
+  await saveGoogleSession(store, { accessToken: 'old', expiresAt: Date.now() - 1000, refreshToken: 'r1' });
+  let n = 0;
+  const fetchImpl: FetchLike = async () => {
+    const token = 'new-' + ++n;
+    await new Promise((r) => setTimeout(r, 5));
+    return { status: 200, ok: true, text: async () => JSON.stringify({ access_token: token, expires_in: 3600 }), headers: { get: () => null } };
+  };
+  const provider = createDriveTokenProvider(store, { clientId: 'cid', fetchImpl });
+  const [a, b] = await Promise.all([provider.getAccessToken(), provider.getAccessToken()]);
+  const stored = (await loadGoogleSession(store))?.accessToken;
+  assert.equal(a, stored, 'first caller gets what was stored');
+  assert.equal(b, stored, 'the slower one defers to it instead of overwriting');
+});
+
+test('platform: an unreadable stored session is reported, not mistaken for signed-out', async () => {
+  const broken = {
+    get: async () => {
+      throw new Error('E_CRYPTO_FAILED');
+    },
+    set: async () => {},
+    delete: async () => {},
+  };
+  const provider = createDriveTokenProvider(broken, { clientId: 'cid', fetchImpl: fakeTokenEndpoint({}).fetchImpl });
+  await assert.rejects(async () => provider.getAccessToken(), { message: UNREADABLE_SESSION_MESSAGE });
 });

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, Alert } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, Alert, Switch } from 'react-native';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 
@@ -14,7 +14,8 @@ import type { AiProvider } from '../../src/core/ai';
 WebBrowser.maybeCompleteAuthSession();
 
 export function SettingsScreen() {
-  const { settings, updateSettings, completeGoogleSignIn, syncBusy, status } = useKano();
+  const { settings, updateSettings, completeGoogleSignIn, syncBusy, status, owlMessages, owlBusy, clearOwlChat, setOwlStream, unreadableKeys } =
+    useKano();
   const [provider, setProvider] = useState<AiProvider>(settings.provider);
   const [claudeApiKey, setClaudeApiKey] = useState(settings.claudeApiKey);
   const [deepSeekApiKey, setDeepSeekApiKey] = useState(settings.deepSeekApiKey);
@@ -34,8 +35,17 @@ export function SettingsScreen() {
     extraParams: { access_type: 'offline', prompt: 'consent' },
   });
 
+  // Each Google response is handled exactly ONCE. The auth hook keeps returning the
+  // same success object for as long as this screen lives, and completeGoogleSignIn
+  // changes settings — so without this guard every settings change (including the one
+  // sign-in itself makes) re-ran the whole sign-in, round and round, every second or
+  // two: re-downloading notes, overwriting the refreshed token with the original one,
+  // and eventually blanking the email once that token expired.
+  const handledResponse = useRef<unknown>(null);
   useEffect(() => {
     if (response?.type !== 'success') return;
+    if (handledResponse.current === response) return;
+    handledResponse.current = response;
     const auth = response.authentication;
     if (!auth?.accessToken) return;
     void (async () => {
@@ -63,7 +73,22 @@ export function SettingsScreen() {
       Alert.alert('Check the API key', check.message || 'Invalid key');
       return;
     }
-    await updateSettings({ ...settings, provider, claudeApiKey, deepSeekApiKey, userName });
+    const saved = await updateSettings({ provider, claudeApiKey, deepSeekApiKey, userName });
+    // Say so either way. A save that failed silently is what made keys "forget".
+    if (saved.ok) Alert.alert('Saved', 'Your settings and API key are saved on this device.');
+    else Alert.alert("Couldn't save", saved.error || 'Please try again.');
+  };
+
+  const onClearChat = () => {
+    if (!owlMessages.length) return;
+    Alert.alert(
+      'Clear chat history?',
+      'This permanently deletes the ' + owlMessages.length + ' Owl messages saved on this phone. It does not affect your notes.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear', style: 'destructive', onPress: () => void clearOwlChat() },
+      ],
+    );
   };
 
   return (
@@ -89,13 +114,43 @@ export function SettingsScreen() {
       </View>
 
       <Text style={styles.label}>Claude API key</Text>
+      {unreadableKeys.claude ? <Text style={styles.warn}>Your saved Claude key couldn't be read on this phone. Paste it again to repair it.</Text> : null}
       <TextInput style={styles.input} placeholder="sk-ant-…" value={claudeApiKey} onChangeText={setClaudeApiKey} autoCapitalize="none" autoCorrect={false} secureTextEntry />
       <Text style={styles.label}>DeepSeek API key</Text>
+      {unreadableKeys.deepSeek ? <Text style={styles.warn}>Your saved DeepSeek key couldn't be read on this phone. Paste it again to repair it.</Text> : null}
       <TextInput style={styles.input} placeholder="sk-…" value={deepSeekApiKey} onChangeText={setDeepSeekApiKey} autoCapitalize="none" autoCorrect={false} secureTextEntry />
+      <Text style={styles.hint}>Keys are kept in this phone's secure keystore and stay saved after you close the app.</Text>
 
       <Text style={styles.section}>The Owl</Text>
       <Text style={styles.label}>Your name (how The Owl addresses you)</Text>
       <TextInput style={styles.input} placeholder="e.g. Sam" value={userName} onChangeText={setUserName} />
+
+      <View style={styles.switchRow}>
+        <View style={styles.switchText}>
+          <Text style={styles.switchLabel}>Stream replies</Text>
+          <Text style={styles.hint}>Show The Owl's answer word by word as it's written.</Text>
+        </View>
+        <Switch
+          value={settings.owlStream}
+          onValueChange={(v) => void setOwlStream(v)}
+          trackColor={{ true: theme.primary, false: theme.border }}
+          thumbColor={theme.surface}
+        />
+      </View>
+
+      <Text style={styles.label}>Chat history</Text>
+      <Text style={styles.hint}>
+        {owlMessages.length
+          ? owlMessages.length + ' message' + (owlMessages.length === 1 ? '' : 's') + ' saved on this phone.'
+          : 'No saved conversation.'}
+      </Text>
+      <Pressable
+        style={[styles.btn, styles.dangerBtn, (!owlMessages.length || owlBusy) && styles.btnOff]}
+        onPress={onClearChat}
+        disabled={!owlMessages.length || owlBusy}
+      >
+        <Text style={styles.dangerText}>Clear chat history</Text>
+      </Pressable>
 
       <Pressable style={[styles.btn, styles.primary, styles.save]} onPress={() => void onSave()}>
         <Text style={styles.primaryText}>Save settings</Text>
@@ -123,5 +178,11 @@ const styles = StyleSheet.create({
   primary: { backgroundColor: theme.primary },
   primaryText: { color: theme.onPrimary, fontWeight: '800' },
   save: { marginTop: 20 },
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12 },
+  switchText: { flex: 1, gap: 2 },
+  switchLabel: { color: theme.text, fontWeight: '700', fontSize: 14 },
+  dangerBtn: { backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.danger },
+  dangerText: { color: theme.danger, fontWeight: '800' },
+  btnOff: { opacity: 0.4 },
   status: { color: theme.muted, fontSize: 12, marginTop: 8 },
 });

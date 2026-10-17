@@ -13,7 +13,16 @@ export type {
   AiJsonResult,
   AiCallOptions,
 } from './types';
-export { CLAUDE_MODEL, DEEPSEEK_MODEL, AI_PROVIDER_META, normalizeProvider } from './providers';
+export {
+  CLAUDE_MODEL,
+  DEEPSEEK_MODEL,
+  AI_PROVIDER_META,
+  AI_ERROR_LABEL,
+  ANTHROPIC_URL,
+  DEEPSEEK_URL,
+  ANTHROPIC_VERSION,
+  normalizeProvider,
+} from './providers';
 export type { ProviderMeta } from './providers';
 export { extractJsonCandidate, parseJsonFromText } from './json';
 export { estimateUsage, aiFeatureLabel, ledgerOperationId } from './usage';
@@ -26,3 +35,12 @@ export {
   callAiText,
   callAiJson,
 } from './client';
+export {
+  AiSseParser,
+  buildStreamingRequest,
+  callAiTextStreaming,
+  STREAM_INTERRUPTED_MESSAGE,
+  STREAM_MAX_TEXT_CHARS,
+  STREAM_MAX_BUFFER_CHARS,
+} from './stream';
+export type { AiStreamRequest, AiStreamCallOptions, AiStreamSink, AiStreamCompletion, AiStreamTransport } from './stream';

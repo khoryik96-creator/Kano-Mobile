@@ -13,7 +13,9 @@ export {
   saveGoogleSession,
   loadGoogleSession,
   sessionExpired,
+  sameGoogleSession,
   refreshGoogleSession,
+  UNREADABLE_SESSION_MESSAGE,
   createDriveTokenProvider,
   FakeGoogleAuthClient,
 } from './googleAuth';

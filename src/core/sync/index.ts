@@ -23,5 +23,6 @@ export {
 } from './payload';
 export type { CloudNotesPayload, CloudPayloadOptions } from './payload';
 export { DriveClient } from './driveClient';
-export { pushNotes, retrieveNotes, inspectCloud } from './syncNotes';
+export type { DriveCallOptions } from './driveClient';
+export { pushNotes, retrieveNotes, inspectCloud, CLOUD_SESSION_CHANGED_MESSAGE } from './syncNotes';
 export type { PushOptions, PushResult, RetrieveResult, InspectResult } from './syncNotes';

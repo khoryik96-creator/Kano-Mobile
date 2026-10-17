@@ -9,12 +9,14 @@ export type { NoteDraft } from './noteEditor';
 export { IMPORTANCE_LEVELS, importanceLevel } from './importance';
 export type { ImportanceLevel } from './importance';
 export { reconcileAfterSync } from './syncReconcile';
-export { sendOwlMessage } from './owlChat';
+export { sendOwlMessage, restoreOwlTranscript, OWL_REPLY_STOPPED } from './owlChat';
 export type { SendOwlInput, SendOwlResult } from './owlChat';
 export {
   defaultSettings,
   validateApiKey,
   activeApiKey,
   normalizeSettings,
+  settingsForStorage,
+  restoreSettings,
 } from './settings';
 export type { SettingsState, KeyValidation } from './settings';
