@@ -25,9 +25,14 @@ export interface PushOptions {
   /**
    * Throws if the Google session this sync started under is no longer current. Called
    * after every download and immediately before every upload — a faithful port of the
-   * extension's kanoRequireCloudSession — so a sync that straddles a sign-in to a
-   * different account stops instead of merging one account's notes into another's
-   * file. Throw CLOUD_SESSION_CHANGED_MESSAGE.
+   * extension's kanoRequireCloudSession. It keeps ONE in-flight sync coherent: one that
+   * straddles a sign-in stops rather than writing a merge built from the old session's
+   * file with the new session's token (or into the wrong file).
+   *
+   * It is not account isolation. The local notes store is per DEVICE, not per account —
+   * exactly as in the extension — so after signing in to a different account, the next
+   * sync merges this device's notes into that account's file. Throw
+   * CLOUD_SESSION_CHANGED_MESSAGE.
    */
   assertSession?: () => void;
 }

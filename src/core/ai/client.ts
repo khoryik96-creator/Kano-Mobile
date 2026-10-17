@@ -1,5 +1,13 @@
 import type { AiFetch, AiCallOptions, AiTextResult, AiJsonResult } from './types';
-import { CLAUDE_MODEL, DEEPSEEK_MODEL, normalizeProvider } from './providers';
+import {
+  CLAUDE_MODEL,
+  DEEPSEEK_MODEL,
+  ANTHROPIC_URL,
+  DEEPSEEK_URL,
+  ANTHROPIC_VERSION,
+  AI_ERROR_LABEL,
+  normalizeProvider,
+} from './providers';
 import { estimateUsage } from './usage';
 import { parseJsonFromText } from './json';
 
@@ -8,10 +16,6 @@ import { parseJsonFromText } from './json';
 // CORS); React Native's native fetch is likewise CORS-free, so the same direct calls
 // work on device. The one input the caller must supply is the user's own provider API
 // key — there is no shared key, so a real call needs a real key (device concern).
-
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
-const ANTHROPIC_VERSION = '2023-06-01';
 
 /** Read a response body, parse it as JSON, and throw the provider's error message. */
 async function readJson(res: { ok: boolean; status: number; text(): Promise<string> }, label: string): Promise<any> {
@@ -50,7 +54,7 @@ export async function callClaudeText(
     signal,
     body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: userText }] }),
   });
-  const data = await readJson(res, 'Claude API');
+  const data = await readJson(res, AI_ERROR_LABEL.claude);
   return {
     text: data.content?.find((b: any) => b.type === 'text')?.text || '',
     usage: estimateUsage('claude', data.usage || {}),
@@ -79,7 +83,7 @@ export async function callClaudeJson(
     signal,
     body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: 'user', content }] }),
   });
-  const data = await readJson(res, 'Claude API');
+  const data = await readJson(res, AI_ERROR_LABEL.claude);
   const raw = data.content?.find((b: any) => b.type === 'text')?.text || '{}';
   return {
     result: parseJsonFromText(raw),
@@ -115,7 +119,7 @@ export async function callDeepSeekText(
       ],
     }),
   });
-  const data = await readJson(res, 'DeepSeek');
+  const data = await readJson(res, AI_ERROR_LABEL.deepseek);
   return {
     text: data.choices?.[0]?.message?.content || '',
     usage: estimateUsage('deepseek', data.usage || {}),
@@ -149,7 +153,7 @@ export async function callDeepSeekJson(
       ],
     }),
   });
-  const data = await readJson(res, 'DeepSeek');
+  const data = await readJson(res, AI_ERROR_LABEL.deepseek);
   const raw = data.choices?.[0]?.message?.content || '{}';
   return {
     result: parseJsonFromText(raw),

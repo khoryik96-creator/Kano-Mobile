@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,62 +12,111 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
+import type { ListRenderItem, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import RenderHtml from 'react-native-render-html';
 
-import { useKano } from '../state';
+import { useKano, useOwlDraft } from '../state';
 import { theme } from '../theme';
 import { activeApiKey } from '../../src/ui';
+import { AI_PROVIDER_META } from '../../src/core/ai';
 import { owlMarkdownToHtml } from '../../src/core/owl';
 import type { OwlMessage } from '../../src/core/owl';
 
 /** Within this many px of the bottom counts as "reading the latest". */
 const FOLLOW_SLOP_PX = 32;
 
+/** A rendered Markdown reply. Memoized: turning text into HTML is a row's expensive part. */
+const OwlReply = memo(function OwlReply({ text, width }: { text: string; width: number }) {
+  return <RenderHtml contentWidth={width - 48} source={{ html: owlMarkdownToHtml(text) }} />;
+});
+
+const OwlRow = memo(function OwlRow({ item, width }: { item: OwlMessage; width: number }) {
+  return (
+    <View style={[styles.msg, item.role === 'user' ? styles.user : styles.assistant]}>
+      <Text style={styles.meta}>
+        {item.role === 'user' ? 'You' : 'The Owl'}
+        {item.cost ? ' · $' + item.cost.toFixed(6) : ''}
+      </Text>
+      {item.role === 'assistant' ? <OwlReply text={item.text} width={width} /> : <Text style={styles.userText}>{item.text}</Text>}
+    </View>
+  );
+});
+
+/**
+ * The reply being composed, under the transcript while The Owl works. The only component
+ * that reads the streaming draft, so its ~80 ms repaints don't re-render anything else.
+ */
+function OwlPending() {
+  const { owlBusy } = useKano();
+  const draft = useOwlDraft();
+  const { width } = useWindowDimensions();
+  if (!owlBusy) return null;
+  return (
+    <View style={[styles.msg, styles.assistant]}>
+      <Text style={styles.meta}>The Owl · {draft ? 'writing…' : 'thinking…'}</Text>
+      {draft ? <OwlReply text={draft} width={width} /> : <ActivityIndicator color={theme.primary} style={styles.thinking} />}
+    </View>
+  );
+}
+
+// Keyed by the message itself, not its position: once the 50-message window is full,
+// every new turn shifts all positions, and index keys would remount (and re-parse) every row.
+const keyOf = (m: OwlMessage, i: number) => (m.ts ? m.ts + ':' + m.role : 'i' + i);
+
 export function OwlChatScreen() {
-  const { owlMessages, owlDraft, ask, clearOwlChat, owlBusy, status, settings, setOwlStream } = useKano();
+  const { owlMessages, ask, stopOwl, clearOwlChat, owlBusy, status, settings, setOwlStream } = useKano();
   const [input, setInput] = useState('');
   const { width } = useWindowDimensions();
   const list = useRef<FlatList<OwlMessage>>(null);
 
   // Follow-latest (port of the extension's kanoOwlFollowLatest): keep the newest message
   // in view as replies arrive or stream in — unless the user has scrolled up to read
-  // something older, in which case leave them there and offer a jump back down. Only a
-  // finger-driven scroll changes the mode, so our own scrollToEnd never switches it off.
+  // something older, in which case leave them there and offer a jump back down. Only
+  // the user's finger changes the mode: a drag, and the fling that follows it. Android
+  // also reports momentum-end for programmatic smooth scrolls, measured against where
+  // the bottom WAS — so momentum only counts right after a drag, and our own scrolls are
+  // never animated.
   const following = useRef(true);
   const dragging = useRef(false);
+  const flinging = useRef(false);
   const [showJump, setShowJump] = useState(false);
 
-  const atBottom = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-    return contentSize.height - (contentOffset.y + layoutMeasurement.height) <= FOLLOW_SLOP_PX;
-  };
   const settle = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    following.current = atBottom(e);
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    following.current = contentSize.height - (contentOffset.y + layoutMeasurement.height) <= FOLLOW_SLOP_PX;
     setShowJump(!following.current);
-  };
-  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (dragging.current) settle(e);
   };
   const jumpToLatest = useCallback(() => {
     following.current = true;
+    flinging.current = false;
     setShowJump(false);
-    list.current?.scrollToEnd({ animated: true });
+    list.current?.scrollToEnd({ animated: false });
   }, []);
   const onContentSizeChange = () => {
     if (following.current) list.current?.scrollToEnd({ animated: false });
   };
+
+  // An emptied chat (cleared here or from Settings) has nothing to jump to.
+  useEffect(() => {
+    if (owlMessages.length) return;
+    following.current = true;
+    flinging.current = false;
+    setShowJump(false);
+  }, [owlMessages.length]);
+
+  const renderItem: ListRenderItem<OwlMessage> = useCallback(({ item }) => <OwlRow item={item} width={width} />, [width]);
 
   const onSend = async () => {
     const q = input.trim();
     if (!q || owlBusy) return;
     // Without a key ask() refuses — keep what was typed instead of silently eating it.
     if (!activeApiKey(settings)) {
-      Alert.alert('Add an API key first', 'Paste your ' + (settings.provider === 'deepseek' ? 'DeepSeek' : 'Claude') + ' key in Settings.');
+      Alert.alert('Add an API key first', 'Paste your ' + AI_PROVIDER_META[settings.provider].label + ' key in Settings.');
       return;
     }
     setInput('');
     following.current = true; // asking is a request to see the answer
+    flinging.current = false;
     setShowJump(false);
     await ask(q);
   };
@@ -79,18 +128,6 @@ export function OwlChatScreen() {
       { text: 'Clear', style: 'destructive', onPress: () => void clearOwlChat() },
     ]);
   };
-
-  const renderAssistant = (text: string) => (
-    <RenderHtml contentWidth={width - 48} source={{ html: owlMarkdownToHtml(text) }} />
-  );
-
-  // The reply being composed, shown under the transcript while The Owl works.
-  const pending = owlBusy ? (
-    <View style={[styles.msg, styles.assistant]}>
-      <Text style={styles.meta}>The Owl · {owlDraft ? 'writing…' : 'thinking…'}</Text>
-      {owlDraft ? renderAssistant(owlDraft) : <ActivityIndicator color={theme.primary} style={styles.thinking} />}
-    </View>
-  ) : null;
 
   return (
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -120,29 +157,29 @@ export function OwlChatScreen() {
         <FlatList
           ref={list}
           data={owlMessages}
-          keyExtractor={(m, i) => (m.ts || '') + ':' + i}
+          keyExtractor={keyOf}
           contentContainerStyle={styles.log}
-          onScroll={onScroll}
+          renderItem={renderItem}
+          onScroll={(e) => {
+            if (dragging.current) settle(e);
+          }}
           scrollEventThrottle={64}
           onScrollBeginDrag={() => {
             dragging.current = true;
+            flinging.current = false;
           }}
-          onScrollEndDrag={(e) => settle(e)}
-          onMomentumScrollEnd={(e) => {
+          onScrollEndDrag={(e) => {
             dragging.current = false;
+            flinging.current = true; // any momentum that follows is this drag's fling
+            settle(e);
+          }}
+          onMomentumScrollEnd={(e) => {
+            if (!flinging.current) return; // not ours to judge: a programmatic scroll
+            flinging.current = false;
             settle(e);
           }}
           onContentSizeChange={onContentSizeChange}
-          renderItem={({ item }) => (
-            <View style={[styles.msg, item.role === 'user' ? styles.user : styles.assistant]}>
-              <Text style={styles.meta}>
-                {item.role === 'user' ? 'You' : 'The Owl'}
-                {item.cost ? ' · $' + item.cost.toFixed(6) : ''}
-              </Text>
-              {item.role === 'assistant' ? renderAssistant(item.text) : <Text style={styles.userText}>{item.text}</Text>}
-            </View>
-          )}
-          ListFooterComponent={pending}
+          ListFooterComponent={OwlPending}
           ListEmptyComponent={
             owlBusy ? null : (
               <Text style={styles.empty}>Ask The Owl about tech stacks, candidate hunting grounds, sourcing ideas, or anything at all.</Text>
@@ -159,9 +196,17 @@ export function OwlChatScreen() {
       {status ? <Text style={styles.status}>{status}</Text> : null}
       <View style={styles.inputRow}>
         <TextInput style={styles.input} placeholder="Ask The Owl…" placeholderTextColor={theme.faint} value={input} onChangeText={setInput} multiline />
-        <Pressable style={[styles.sendBtn, owlBusy && styles.sendOff]} onPress={() => void onSend()} disabled={owlBusy}>
-          <Text style={styles.sendText}>{owlBusy ? '…' : 'Ask'}</Text>
-        </Pressable>
+        {owlBusy ? (
+          // While a reply is coming, the button stops it — the way out of a reply that
+          // is taking too long, streamed or not.
+          <Pressable style={[styles.sendBtn, styles.stopBtn]} onPress={stopOwl} accessibilityLabel="Stop The Owl's reply">
+            <Text style={styles.stopText}>Stop</Text>
+          </Pressable>
+        ) : (
+          <Pressable style={styles.sendBtn} onPress={() => void onSend()}>
+            <Text style={styles.sendText}>Ask</Text>
+          </Pressable>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -202,7 +247,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
   },
   jumpText: { color: theme.onPrimary, fontWeight: '800', fontSize: 13 },
-  sendOff: { opacity: 0.6 },
   clear: { color: theme.primary, fontSize: 13, fontWeight: '700' },
   clearOff: { color: theme.faint },
   log: { padding: 12, gap: 10 },
@@ -234,4 +278,6 @@ const styles = StyleSheet.create({
   },
   sendBtn: { backgroundColor: theme.primary, borderRadius: theme.radiusSm, paddingHorizontal: 20, paddingVertical: 12 },
   sendText: { color: theme.onPrimary, fontWeight: '800' },
+  stopBtn: { backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.danger },
+  stopText: { color: theme.danger, fontWeight: '800' },
 });

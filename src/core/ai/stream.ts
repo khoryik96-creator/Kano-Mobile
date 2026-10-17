@@ -1,5 +1,13 @@
 import type { AiProvider, AiTextResult } from './types';
-import { CLAUDE_MODEL, DEEPSEEK_MODEL, normalizeProvider } from './providers';
+import {
+  CLAUDE_MODEL,
+  DEEPSEEK_MODEL,
+  ANTHROPIC_URL,
+  DEEPSEEK_URL,
+  ANTHROPIC_VERSION,
+  AI_ERROR_LABEL,
+  normalizeProvider,
+} from './providers';
 import { estimateUsage } from './usage';
 import type { RawUsage } from './usage';
 
@@ -11,10 +19,6 @@ import type { RawUsage } from './usage';
 // handling, the size limits, the JSON fallback — is pure and identical.
 //
 // Like the extension, this never retries: a streamed request is billable.
-
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
-const ANTHROPIC_VERSION = '2023-06-01';
 
 /** Mirrors the extension's caps: refuse a reply or a single event that runs away. */
 export const STREAM_MAX_TEXT_CHARS = 200_000;
@@ -186,7 +190,7 @@ function errorFromBody(provider: AiProvider, status: number, bodyText: string): 
   } catch {
     /* not JSON — fall through */
   }
-  return new Error((provider === 'deepseek' ? 'DeepSeek' : 'Claude') + ' HTTP ' + status);
+  return new Error(AI_ERROR_LABEL[provider] + ' HTTP ' + status);
 }
 
 /**
@@ -240,7 +244,7 @@ export async function callAiTextStreaming(
     try {
       data = JSON.parse(done.bodyText || '{}');
     } catch {
-      throw new Error((provider === 'deepseek' ? 'DeepSeek' : 'Claude') + ' returned non-JSON response.');
+      throw new Error(AI_ERROR_LABEL[provider] + ' returned non-JSON response.');
     }
     if (data.error) throw new Error(data.error.message || 'Provider error');
     const text =

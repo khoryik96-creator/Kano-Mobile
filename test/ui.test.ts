@@ -264,3 +264,21 @@ test('ui/owlChat: a saved transcript restores; damaged entries are dropped, not 
   assert.equal(restored.length, 50, 'capped to the visible window');
   assert.equal(restored[49]!.text, 'm79', 'keeping the newest');
 });
+
+// A hostile or corrupted blob must never stop the app from starting: these values make
+// String()/Number() throw, and the restore runs before the first screen can render.
+const POISON = { toString: 0, valueOf: 0 };
+
+test('ui/settings: restore survives values that would throw if coerced', () => {
+  const raw = JSON.stringify({ provider: POISON, userName: POISON, googleEmail: POISON, owlStream: 'yes' });
+  const back = restoreSettings(raw, { claudeApiKey: POISON as unknown as string, deepSeekApiKey: 'sk-d' });
+  assert.deepEqual(back, { ...defaultSettings(), deepSeekApiKey: 'sk-d' }, 'bad fields fall back to defaults');
+});
+
+test('ui/owlChat: restore survives a poisoned cost field', () => {
+  const raw = JSON.stringify([{ role: 'assistant', text: 'ok', cost: POISON }, { role: 'user', text: 'hi', cost: '5' }]);
+  assert.deepEqual(restoreOwlTranscript(raw), [
+    { role: 'assistant', text: 'ok' },
+    { role: 'user', text: 'hi' },
+  ]);
+});

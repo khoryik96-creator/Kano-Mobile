@@ -73,11 +73,19 @@ export function restoreSettings(
   rawPlain: string | null,
   keys: { claudeApiKey?: string | null; deepSeekApiKey?: string | null },
 ): SettingsState {
-  let plain: Partial<SettingsState> = {};
+  // Storage is untrusted input: copy only fields of the expected primitive type. A
+  // non-string (say an object whose toString isn't callable) would otherwise make
+  // normalizeSettings throw — and a throw here means the app never finishes starting.
+  const plain: Partial<SettingsState> = {};
   if (rawPlain) {
     try {
-      const parsed = JSON.parse(rawPlain);
-      if (parsed && typeof parsed === 'object') plain = parsed as Partial<SettingsState>;
+      const parsed = JSON.parse(rawPlain) as Record<string, unknown> | null;
+      if (parsed && typeof parsed === 'object') {
+        if (typeof parsed.provider === 'string') plain.provider = parsed.provider as SettingsState['provider'];
+        if (typeof parsed.userName === 'string') plain.userName = parsed.userName;
+        if (typeof parsed.googleEmail === 'string') plain.googleEmail = parsed.googleEmail;
+        if (typeof parsed.owlStream === 'boolean') plain.owlStream = parsed.owlStream;
+      }
     } catch {
       /* corrupt blob — keep defaults rather than failing start-up */
     }
@@ -85,7 +93,7 @@ export function restoreSettings(
   return normalizeSettings({
     ...defaultSettings(),
     ...plain,
-    claudeApiKey: keys.claudeApiKey || '',
-    deepSeekApiKey: keys.deepSeekApiKey || '',
+    claudeApiKey: typeof keys.claudeApiKey === 'string' ? keys.claudeApiKey : '',
+    deepSeekApiKey: typeof keys.deepSeekApiKey === 'string' ? keys.deepSeekApiKey : '',
   });
 }

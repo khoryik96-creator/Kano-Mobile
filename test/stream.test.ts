@@ -8,7 +8,7 @@ import {
   STREAM_INTERRUPTED_MESSAGE,
 } from '../src/core/ai';
 import type { AiStreamTransport } from '../src/core/ai';
-import { sendOwlMessage } from '../src/ui';
+import { sendOwlMessage, OWL_REPLY_STOPPED } from '../src/ui';
 
 // Streaming replies — core/ai/stream, a lift of the extension's kano_ai_stream.js.
 // These bodies were also run through the extension's live kanoReadAiStream (v4.98.41)
@@ -104,7 +104,7 @@ test('stream: a provider error event mid-stream surfaces its message', async () 
 test('stream: a non-2xx response reports the provider error, never parses it as events', async () => {
   const body = JSON.stringify({ error: { type: 'authentication_error', message: 'invalid x-api-key' } });
   await assert.rejects(callAiTextStreaming(slicing(body, 4, 401, 'application/json'), CALL, () => {}), { message: 'invalid x-api-key' });
-  await assert.rejects(callAiTextStreaming(slicing('<html>bad gateway</html>', 4, 502, 'text/html'), CALL, () => {}), { message: 'Claude HTTP 502' });
+  await assert.rejects(callAiTextStreaming(slicing('<html>bad gateway</html>', 4, 502, 'text/html'), CALL, () => {}), { message: 'Claude API HTTP 502' }, 'same wording as a non-streamed failure');
 });
 
 test('stream: a gateway that answers with plain JSON still works', async () => {
@@ -185,4 +185,43 @@ test('owl: a streamed turn yields the same transcript as a non-streamed one', as
   });
   assert.equal(failed.ok, false);
   assert.match(failed.messages[1]!.text, /^Provider\/error notice: Reply interrupted/);
+});
+
+test('owl: a stopped reply is named as such, with the caller-supplied reason when given', async () => {
+  const controller = new AbortController();
+  // A transport that hangs until aborted — the stalled-network case.
+  const hanging: AiStreamTransport = (_req, _sink, signal) =>
+    new Promise((_resolve, reject) => {
+      (signal as AbortSignal).addEventListener('abort', () => reject(new Error('Aborted')));
+    });
+  const base = {
+    messages: [],
+    input: 'hi',
+    provider: 'claude' as const,
+    apiKey: 'k',
+    fetchImpl: async () => {
+      throw new Error('unused');
+    },
+  };
+
+  const stopped = sendOwlMessage({ ...base, signal: controller.signal, stream: { transport: hanging, onText: () => {} } });
+  controller.abort();
+  const r1 = await stopped;
+  assert.equal(r1.ok, false);
+  assert.equal(r1.messages[1]!.text, 'Provider/error notice: ' + OWL_REPLY_STOPPED, 'not the raw "Aborted"');
+
+  const timedOut = new AbortController();
+  const p2 = sendOwlMessage({
+    ...base,
+    signal: timedOut.signal,
+    abortReason: () => 'The Owl took too long to reply.',
+    stream: { transport: hanging, onText: () => {} },
+  });
+  timedOut.abort();
+  assert.equal((await p2).messages[1]!.text, 'Provider/error notice: The Owl took too long to reply.');
+
+  // A genuine provider failure is NOT relabelled as stopped.
+  const failing: AiStreamTransport = async () => ({ status: 401, contentType: 'application/json', bodyText: '{"error":{"message":"bad key"}}' });
+  const r3 = await sendOwlMessage({ ...base, signal: new AbortController().signal, stream: { transport: failing, onText: () => {} } });
+  assert.equal(r3.messages[1]!.text, 'Provider/error notice: bad key');
 });

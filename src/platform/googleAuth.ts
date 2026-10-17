@@ -52,7 +52,10 @@ export async function saveGoogleSession(store: SecureStore, session: GoogleSessi
   await store.set(SECURE_KEYS.googleToken, JSON.stringify(session));
 }
 
-/** Load the persisted session, or null if none / unparseable. */
+/**
+ * Load the persisted session, or null if none / unparseable. Rejects if the secure
+ * store itself can't be read — "couldn't read it" is not "signed out".
+ */
 export async function loadGoogleSession(store: SecureStore): Promise<GoogleSession | null> {
   const raw = await store.get(SECURE_KEYS.googleToken);
   if (!raw) return null;
@@ -61,6 +64,14 @@ export async function loadGoogleSession(store: SecureStore): Promise<GoogleSessi
   } catch {
     return null;
   }
+}
+
+/** Shown when the stored Google session exists but can't be read (keystore error). */
+export const UNREADABLE_SESSION_MESSAGE = "Couldn't read your Google sign-in on this phone. Sign in again in Settings.";
+
+/** The same stored session — same grant and same access token. */
+export function sameGoogleSession(a: GoogleSession | null, b: GoogleSession | null): boolean {
+  return !!a && !!b && a.accessToken === b.accessToken && (a.refreshToken || '') === (b.refreshToken || '');
 }
 
 /** True when the session's access token is gone or (nearly) expired. */
@@ -147,13 +158,34 @@ export async function refreshGoogleSession(
 export function createDriveTokenProvider(store: SecureStore, refresh?: GoogleRefreshConfig): TokenProvider {
   return {
     async getAccessToken(): Promise<string | null> {
-      const session = await loadGoogleSession(store);
+      let session: GoogleSession | null;
+      try {
+        session = await loadGoogleSession(store);
+      } catch {
+        throw new Error(UNREADABLE_SESSION_MESSAGE);
+      }
       if (!session || !session.accessToken) return null;
       if (!sessionExpired(session)) return session.accessToken;
 
       if (!refresh?.clientId || !session.refreshToken) return null;
       const outcome = await refreshGoogleSession(session, refresh);
       if (outcome.status !== 'refreshed') return null;
+
+      // Compare-and-set. The refresh was a network round-trip, and the store may have
+      // changed meanwhile — typically a new sign-in (possibly to another account)
+      // writing its own session. Saving our result now would put the OLD account's
+      // token back over it, and every later sync would quietly run as the wrong user.
+      // So only persist if the store still holds the session we refreshed; otherwise
+      // defer to whatever is there now.
+      let current: GoogleSession | null;
+      try {
+        current = await loadGoogleSession(store);
+      } catch {
+        return null;
+      }
+      if (!sameGoogleSession(current, session)) {
+        return current && !sessionExpired(current) ? current.accessToken : null;
+      }
       await saveGoogleSession(store, outcome.session);
       return outcome.session.accessToken;
     },

@@ -9,7 +9,7 @@ export type { NoteDraft } from './noteEditor';
 export { IMPORTANCE_LEVELS, importanceLevel } from './importance';
 export type { ImportanceLevel } from './importance';
 export { reconcileAfterSync } from './syncReconcile';
-export { sendOwlMessage, restoreOwlTranscript } from './owlChat';
+export { sendOwlMessage, restoreOwlTranscript, OWL_REPLY_STOPPED } from './owlChat';
 export type { SendOwlInput, SendOwlResult } from './owlChat';
 export {
   defaultSettings,

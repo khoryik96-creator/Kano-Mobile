@@ -8,7 +8,8 @@ import { stableNoteIdFromRecord } from './identity';
 // fixtures/merge_note_state.json (and the smaller merge/resolve/sort suites).
 //
 // The rules, verbatim:
-//   1. Last edit wins by `updatedAt` ISO-string comparison; on a tie, local wins.
+//   1. Last edit wins by `updatedAt`, compared as INSTANTS (not strings — extension
+//      v4.98.19+); on a tie, local wins.
 //   2. A note strictly newer than its tombstone is revived (tombstone dropped);
 //      otherwise (deletedAt >= updatedAt) it stays deleted.
 //   3. Tombstones are retained 90 days, deduped to the newest per id.

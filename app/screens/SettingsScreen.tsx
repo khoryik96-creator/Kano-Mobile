@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, Alert, Switch } from 'react-native';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
@@ -14,7 +14,8 @@ import type { AiProvider } from '../../src/core/ai';
 WebBrowser.maybeCompleteAuthSession();
 
 export function SettingsScreen() {
-  const { settings, updateSettings, completeGoogleSignIn, syncBusy, status, owlMessages, owlBusy, clearOwlChat, setOwlStream } = useKano();
+  const { settings, updateSettings, completeGoogleSignIn, syncBusy, status, owlMessages, owlBusy, clearOwlChat, setOwlStream, unreadableKeys } =
+    useKano();
   const [provider, setProvider] = useState<AiProvider>(settings.provider);
   const [claudeApiKey, setClaudeApiKey] = useState(settings.claudeApiKey);
   const [deepSeekApiKey, setDeepSeekApiKey] = useState(settings.deepSeekApiKey);
@@ -34,8 +35,17 @@ export function SettingsScreen() {
     extraParams: { access_type: 'offline', prompt: 'consent' },
   });
 
+  // Each Google response is handled exactly ONCE. The auth hook keeps returning the
+  // same success object for as long as this screen lives, and completeGoogleSignIn
+  // changes settings — so without this guard every settings change (including the one
+  // sign-in itself makes) re-ran the whole sign-in, round and round, every second or
+  // two: re-downloading notes, overwriting the refreshed token with the original one,
+  // and eventually blanking the email once that token expired.
+  const handledResponse = useRef<unknown>(null);
   useEffect(() => {
     if (response?.type !== 'success') return;
+    if (handledResponse.current === response) return;
+    handledResponse.current = response;
     const auth = response.authentication;
     if (!auth?.accessToken) return;
     void (async () => {
@@ -63,7 +73,7 @@ export function SettingsScreen() {
       Alert.alert('Check the API key', check.message || 'Invalid key');
       return;
     }
-    const saved = await updateSettings({ ...settings, provider, claudeApiKey, deepSeekApiKey, userName });
+    const saved = await updateSettings({ provider, claudeApiKey, deepSeekApiKey, userName });
     // Say so either way. A save that failed silently is what made keys "forget".
     if (saved.ok) Alert.alert('Saved', 'Your settings and API key are saved on this device.');
     else Alert.alert("Couldn't save", saved.error || 'Please try again.');
@@ -104,8 +114,10 @@ export function SettingsScreen() {
       </View>
 
       <Text style={styles.label}>Claude API key</Text>
+      {unreadableKeys.claude ? <Text style={styles.warn}>Your saved Claude key couldn't be read on this phone. Paste it again to repair it.</Text> : null}
       <TextInput style={styles.input} placeholder="sk-ant-…" value={claudeApiKey} onChangeText={setClaudeApiKey} autoCapitalize="none" autoCorrect={false} secureTextEntry />
       <Text style={styles.label}>DeepSeek API key</Text>
+      {unreadableKeys.deepSeek ? <Text style={styles.warn}>Your saved DeepSeek key couldn't be read on this phone. Paste it again to repair it.</Text> : null}
       <TextInput style={styles.input} placeholder="sk-…" value={deepSeekApiKey} onChangeText={setDeepSeekApiKey} autoCapitalize="none" autoCorrect={false} secureTextEntry />
       <Text style={styles.hint}>Keys are kept in this phone's secure keystore and stay saved after you close the app.</Text>
 

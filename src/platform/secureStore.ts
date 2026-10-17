@@ -5,7 +5,12 @@
 // to, and InMemorySecureStore backs the Node tests.
 
 export interface SecureStore {
-  /** The stored value, or null when absent — or unreadable (see the native adapter). */
+  /**
+   * The stored value, or null when absent. REJECTS when a value exists but can't be
+   * read (e.g. an Android keystore entry orphaned by a reinstall). Callers must not
+   * treat that as "absent": a key that merely failed to load must never be overwritten
+   * or deleted on the strength of an empty Settings box.
+   */
   get(key: string): Promise<string | null>;
   /**
    * Store a value. Setting an empty value REMOVES the key: "no Claude key" is the

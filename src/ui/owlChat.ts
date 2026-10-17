@@ -25,7 +25,15 @@ export interface SendOwlInput {
    * reply as it grows; the resolved result is identical either way.
    */
   stream?: { transport: AiStreamTransport; onText: (text: string) => void };
+  /**
+   * Why `signal` was aborted, if the caller knows better than "stopped" (e.g. a
+   * timeout). Read only when the signal is aborted.
+   */
+  abortReason?: () => string | undefined;
 }
+
+/** The notice for a reply the user (or a timeout) cut short. */
+export const OWL_REPLY_STOPPED = 'Reply stopped.';
 
 export interface SendOwlResult {
   messages: OwlMessage[];
@@ -61,7 +69,12 @@ export async function sendOwlMessage(opts: SendOwlInput): Promise<SendOwlResult>
     const cost = Number(res.usage?.costUsd || 0) || 0;
     return { messages: appendOwlMessage(withUser, makeOwlMessage('assistant', text, cost)), cost, ok: true };
   } catch (e) {
-    const error = String((e as Error)?.message || e || 'Unknown error');
+    // An aborted request surfaces as whatever the transport throws ("Aborted",
+    // "Network request failed"…). Name it for what it was instead.
+    const aborted = !!(opts.signal as { aborted?: boolean } | undefined)?.aborted;
+    const error = aborted
+      ? opts.abortReason?.() || OWL_REPLY_STOPPED
+      : String((e as Error)?.message || e || 'Unknown error');
     const messages = appendOwlMessage(withUser, makeOwlMessage('assistant', 'Provider/error notice: ' + error, 0));
     return { messages, cost: 0, ok: false, error };
   }
@@ -89,8 +102,9 @@ export function restoreOwlTranscript(raw: string | null | undefined): OwlMessage
     const text = (m as OwlMessage).text;
     if ((role !== 'user' && role !== 'assistant') || typeof text !== 'string' || !text.trim()) continue;
     const msg: OwlMessage = { role, text };
-    const cost = Number((m as OwlMessage).cost || 0);
-    if (Number.isFinite(cost) && cost > 0) msg.cost = cost;
+    // typeof-checked, never coerced: Number() on a hostile object can throw.
+    const cost = (m as OwlMessage).cost;
+    if (typeof cost === 'number' && Number.isFinite(cost) && cost > 0) msg.cost = cost;
     if (typeof (m as OwlMessage).ts === 'string') msg.ts = (m as OwlMessage).ts;
     if ((m as OwlMessage).local === true) msg.local = true;
     out.push(msg);
