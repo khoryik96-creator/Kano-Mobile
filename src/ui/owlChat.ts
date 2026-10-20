@@ -30,6 +30,12 @@ export interface SendOwlInput {
    * timeout). Read only when the signal is aborted.
    */
   abortReason?: () => string | undefined;
+  /**
+   * The user's turn, if the caller already built (and displayed) it. Reusing the same
+   * object keeps its identity — and so its list key — stable from the moment it's shown
+   * to the moment the reply lands, so the row isn't torn down and rebuilt mid-turn.
+   */
+  userMessage?: OwlMessage;
 }
 
 /** The notice for a reply the user (or a timeout) cut short. */
@@ -47,7 +53,7 @@ export async function sendOwlMessage(opts: SendOwlInput): Promise<SendOwlResult>
   const input = String(opts.input || '').trim();
   if (!input) return { messages: opts.messages, cost: 0, ok: false, error: 'Type a question for The Owl first' };
 
-  const withUser = appendOwlMessage(opts.messages, makeOwlMessage('user', input));
+  const withUser = appendOwlMessage(opts.messages, opts.userMessage ?? makeOwlMessage('user', input));
   try {
     const userText = buildOwlPrompt(input, {
       messages: withUser,

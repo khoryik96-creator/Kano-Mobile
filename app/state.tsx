@@ -464,7 +464,8 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
 
       // Show — and save — the question straight away. It used to appear only once the
       // whole reply was back, and was gone if the app closed in the meantime.
-      const shown = appendOwlMessage(history, makeOwlMessage('user', question));
+      const userTurn = makeOwlMessage('user', question);
+      const shown = appendOwlMessage(history, userTurn);
       owlRef.current = shown;
       setOwlMessages(shown);
       void persistOwl(shown, gen);
@@ -506,6 +507,7 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
           pageContext,
           signal: run.controller.signal,
           abortReason: () => run.reason,
+          userMessage: userTurn, // the very bubble already on screen — no remount
           stream: streaming ? { transport: xhrStreamTransport, onText } : undefined,
         });
       } finally {

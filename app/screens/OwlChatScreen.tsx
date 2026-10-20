@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import type { ListRenderItem, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
-import RenderHtml from 'react-native-render-html';
+import { TRenderEngineProvider, RenderHTMLConfigProvider, RenderHTMLSource } from 'react-native-render-html';
 
 import { useKano, useOwlDraft } from '../state';
 import { theme } from '../theme';
@@ -22,12 +22,25 @@ import { AI_PROVIDER_META } from '../../src/core/ai';
 import { owlMarkdownToHtml } from '../../src/core/owl';
 import type { OwlMessage } from '../../src/core/owl';
 
-/** Within this many px of the bottom counts as "reading the latest". */
+/** Within this many px of the newest message counts as "reading the latest". */
 const FOLLOW_SLOP_PX = 32;
 
-/** A rendered Markdown reply. Memoized: turning text into HTML is a row's expensive part. */
+/**
+ * While the user reads older messages, hold their place as new content arrives below
+ * (a new message, or a reply streaming in). `minIndexForVisible: 0` tracks the first
+ * visible message; FlatList shifts it past the "composing" bubble for us. A constant, so
+ * the prop keeps its identity between renders.
+ */
+const HOLD_READING_POSITION = { minIndexForVisible: 0 } as const;
+
+/**
+ * A rendered Markdown reply. All replies share ONE render engine (the providers around
+ * the screen) instead of each <RenderHtml> building its own — in a long chat that was a
+ * full engine per message, rebuilt whenever a row scrolled back into view.
+ */
 const OwlReply = memo(function OwlReply({ text, width }: { text: string; width: number }) {
-  return <RenderHtml contentWidth={width - 48} source={{ html: owlMarkdownToHtml(text) }} />;
+  const source = useMemo(() => ({ html: owlMarkdownToHtml(text) }), [text]);
+  return <RenderHTMLSource contentWidth={width - 48} source={source} />;
 });
 
 const OwlRow = memo(function OwlRow({ item, width }: { item: OwlMessage; width: number }) {
@@ -43,8 +56,9 @@ const OwlRow = memo(function OwlRow({ item, width }: { item: OwlMessage; width: 
 });
 
 /**
- * The reply being composed, under the transcript while The Owl works. The only component
- * that reads the streaming draft, so its ~80 ms repaints don't re-render anything else.
+ * The reply being composed, under the newest message while The Owl works. The only
+ * component that reads the streaming draft, so its ~80 ms repaints don't re-render
+ * anything else.
  */
 function OwlPending() {
   const { owlBusy } = useKano();
@@ -69,32 +83,36 @@ export function OwlChatScreen() {
   const { width } = useWindowDimensions();
   const list = useRef<FlatList<OwlMessage>>(null);
 
-  // Follow-latest (port of the extension's kanoOwlFollowLatest): keep the newest message
-  // in view as replies arrive or stream in — unless the user has scrolled up to read
-  // something older, in which case leave them there and offer a jump back down. Only
-  // the user's finger changes the mode: a drag, and the fling that follows it. Android
-  // also reports momentum-end for programmatic smooth scrolls, measured against where
-  // the bottom WAS — so momentum only counts right after a drag, and our own scrolls are
-  // never animated.
+  // The list is INVERTED — newest first, drawn bottom-up — which is how chat apps keep
+  // the latest message pinned to the bottom. Scroll offset 0 is the newest message, so
+  // while you're there, new messages and streamed text simply grow upward from the
+  // bottom edge: nothing is scrolled programmatically at all. The old approach (a normal
+  // list plus scrollToEnd on every content change) drew each change first and scrolled a
+  // frame later, so once the chat was taller than the screen, every update visibly jumped
+  // — and at the 50-message cap, dropping the oldest messages shifted everything again.
+  // (Dropped messages now leave from the far end, out of sight.)
+  const data = useMemo(() => owlMessages.slice().reverse(), [owlMessages]);
+
+  // Follow-latest (port of the extension's kanoOwlFollowLatest): at the bottom, stay at
+  // the bottom; scrolled up to read, stay put and offer a jump back down. Only the user's
+  // finger changes the mode: a drag, and the fling that follows it. (Android reports
+  // momentum-end for programmatic smooth scrolls too, so momentum only counts right after
+  // a drag — and our own scrolls are never animated.)
   const following = useRef(true);
   const dragging = useRef(false);
   const flinging = useRef(false);
   const [showJump, setShowJump] = useState(false);
 
   const settle = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-    following.current = contentSize.height - (contentOffset.y + layoutMeasurement.height) <= FOLLOW_SLOP_PX;
+    following.current = e.nativeEvent.contentOffset.y <= FOLLOW_SLOP_PX;
     setShowJump(!following.current);
   };
   const jumpToLatest = useCallback(() => {
     following.current = true;
     flinging.current = false;
     setShowJump(false);
-    list.current?.scrollToEnd({ animated: false });
+    list.current?.scrollToOffset({ offset: 0, animated: false });
   }, []);
-  const onContentSizeChange = () => {
-    if (following.current) list.current?.scrollToEnd({ animated: false });
-  };
 
   // An emptied chat (cleared here or from Settings) has nothing to jump to.
   useEffect(() => {
@@ -115,9 +133,8 @@ export function OwlChatScreen() {
       return;
     }
     setInput('');
-    following.current = true; // asking is a request to see the answer
-    flinging.current = false;
-    setShowJump(false);
+    // Asking is a request to see the answer: back to the newest message if scrolled up.
+    if (!following.current) jumpToLatest();
     await ask(q);
   };
 
@@ -130,85 +147,94 @@ export function OwlChatScreen() {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={styles.bar}>
-        <Pressable
-          onPress={() => void setOwlStream(!settings.owlStream)}
-          style={[styles.pill, settings.owlStream && styles.pillOn]}
-          hitSlop={6}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: settings.owlStream }}
-        >
-          <Text style={[styles.pillText, settings.owlStream && styles.pillTextOn]}>
-            {settings.owlStream ? 'Stream on' : 'Stream off'}
-          </Text>
-        </Pressable>
-        <View style={styles.barRight}>
-          {owlMessages.length ? <Text style={styles.barCount}>{owlMessages.length} messages</Text> : null}
-          {owlMessages.length ? (
-            <Pressable onPress={onClear} hitSlop={8} disabled={owlBusy}>
-              <Text style={[styles.clear, owlBusy && styles.clearOff]}>Clear</Text>
+    <TRenderEngineProvider>
+      <RenderHTMLConfigProvider>
+        <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.bar}>
+            <Pressable
+              onPress={() => void setOwlStream(!settings.owlStream)}
+              style={[styles.pill, settings.owlStream && styles.pillOn]}
+              hitSlop={6}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: settings.owlStream }}
+            >
+              <Text style={[styles.pillText, settings.owlStream && styles.pillTextOn]}>
+                {settings.owlStream ? 'Stream on' : 'Stream off'}
+              </Text>
             </Pressable>
-          ) : null}
-        </View>
-      </View>
+            <View style={styles.barRight}>
+              {owlMessages.length ? <Text style={styles.barCount}>{owlMessages.length} messages</Text> : null}
+              {owlMessages.length ? (
+                <Pressable onPress={onClear} hitSlop={8} disabled={owlBusy}>
+                  <Text style={[styles.clear, owlBusy && styles.clearOff]}>Clear</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
 
-      <View style={styles.logWrap}>
-        <FlatList
-          ref={list}
-          data={owlMessages}
-          keyExtractor={keyOf}
-          contentContainerStyle={styles.log}
-          renderItem={renderItem}
-          onScroll={(e) => {
-            if (dragging.current) settle(e);
-          }}
-          scrollEventThrottle={64}
-          onScrollBeginDrag={() => {
-            dragging.current = true;
-            flinging.current = false;
-          }}
-          onScrollEndDrag={(e) => {
-            dragging.current = false;
-            flinging.current = true; // any momentum that follows is this drag's fling
-            settle(e);
-          }}
-          onMomentumScrollEnd={(e) => {
-            if (!flinging.current) return; // not ours to judge: a programmatic scroll
-            flinging.current = false;
-            settle(e);
-          }}
-          onContentSizeChange={onContentSizeChange}
-          ListFooterComponent={OwlPending}
-          ListEmptyComponent={
-            owlBusy ? null : (
-              <Text style={styles.empty}>Ask The Owl about tech stacks, candidate hunting grounds, sourcing ideas, or anything at all.</Text>
-            )
-          }
-        />
-        {showJump ? (
-          <Pressable style={styles.jump} onPress={jumpToLatest}>
-            <Text style={styles.jumpText}>↓ Latest</Text>
-          </Pressable>
-        ) : null}
-      </View>
+          <View style={styles.logWrap}>
+            {owlMessages.length || owlBusy ? (
+              <FlatList
+                ref={list}
+                inverted
+                data={data}
+                keyExtractor={keyOf}
+                contentContainerStyle={styles.log}
+                renderItem={renderItem}
+                // Inverted: the header sits at the bottom, under the newest message.
+                ListHeaderComponent={OwlPending}
+                maintainVisibleContentPosition={showJump ? HOLD_READING_POSITION : undefined}
+                onScroll={(e) => {
+                  if (dragging.current) settle(e);
+                }}
+                scrollEventThrottle={64}
+                onScrollBeginDrag={() => {
+                  dragging.current = true;
+                  flinging.current = false;
+                }}
+                onScrollEndDrag={(e) => {
+                  dragging.current = false;
+                  flinging.current = true; // any momentum that follows is this drag's fling
+                  settle(e);
+                }}
+                onMomentumScrollEnd={(e) => {
+                  if (!flinging.current) return; // not ours to judge: a programmatic scroll
+                  flinging.current = false;
+                  settle(e);
+                }}
+              />
+            ) : (
+              <View style={styles.emptyWrap}>
+                <Text style={styles.empty}>Ask The Owl about tech stacks, candidate hunting grounds, sourcing ideas, or anything at all.</Text>
+              </View>
+            )}
+            {showJump ? (
+              <Pressable style={styles.jump} onPress={jumpToLatest}>
+                <Text style={styles.jumpText}>↓ Latest</Text>
+              </Pressable>
+            ) : null}
+          </View>
 
-      {status ? <Text style={styles.status}>{status}</Text> : null}
-      <View style={styles.inputRow}>
-        <TextInput style={styles.input} placeholder="Ask The Owl…" placeholderTextColor={theme.faint} value={input} onChangeText={setInput} multiline />
-        {owlBusy ? (
-          // While a reply is coming, the button stops it — the way out of a reply that
-          // is taking too long, streamed or not.
-          <Pressable style={[styles.sendBtn, styles.stopBtn]} onPress={stopOwl} accessibilityLabel="Stop The Owl's reply">
-            <Text style={styles.stopText}>Stop</Text>
-          </Pressable>
-        ) : (
-          <Pressable style={styles.sendBtn} onPress={() => void onSend()}>
-            <Text style={styles.sendText}>Ask</Text>
-          </Pressable>
-        )}
-      </View>
-    </KeyboardAvoidingView>
+          <Text style={styles.status} numberOfLines={1}>
+            {status || ' '}
+          </Text>
+          <View style={styles.inputRow}>
+            <TextInput style={styles.input} placeholder="Ask The Owl…" placeholderTextColor={theme.faint} value={input} onChangeText={setInput} multiline />
+            {owlBusy ? (
+              // While a reply is coming, the button stops it — the way out of a reply that
+              // is taking too long, streamed or not.
+              <Pressable style={[styles.sendBtn, styles.stopBtn]} onPress={stopOwl} accessibilityLabel="Stop The Owl's reply">
+                <Text style={styles.stopText}>Stop</Text>
+              </Pressable>
+            ) : (
+              <Pressable style={styles.sendBtn} onPress={() => void onSend()}>
+                <Text style={styles.sendText}>Ask</Text>
+              </Pressable>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </RenderHTMLConfigProvider>
+    </TRenderEngineProvider>
   );
 }
 
@@ -256,7 +282,10 @@ const styles = StyleSheet.create({
   meta: { fontSize: 11, color: theme.faint, marginBottom: 4, fontWeight: '600' },
   userText: { fontSize: 15, color: theme.text },
   empty: { textAlign: 'center', color: theme.faint, marginTop: 40, paddingHorizontal: 24, lineHeight: 21 },
+  // Always rendered, always one line: a status line popping in and out would resize the
+  // list from below and nudge the whole conversation each time.
   status: { paddingHorizontal: 12, paddingBottom: 4, color: theme.muted, fontSize: 12 },
+  emptyWrap: { flex: 1 },
   inputRow: {
     flexDirection: 'row',
     gap: 8,

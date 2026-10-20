@@ -282,3 +282,17 @@ test('ui/owlChat: restore survives a poisoned cost field', () => {
     { role: 'user', text: 'hi' },
   ]);
 });
+
+test('ui/owlChat: the question already on screen is reused in the final transcript (no remount)', async () => {
+  const shown = { role: 'user' as const, text: 'Which stack?', ts: '2026-10-20T00:00:00.000Z', cost: 0 };
+  const res = await sendOwlMessage({
+    messages: [],
+    input: 'Which stack?',
+    provider: 'claude',
+    apiKey: 'sk-ant-x',
+    fetchImpl: okFetch('Go.'),
+    userMessage: shown,
+  });
+  assert.equal(res.messages[0], shown, 'the same object, so its list key and row survive the turn');
+  assert.equal(res.messages[1]!.role, 'assistant');
+});
