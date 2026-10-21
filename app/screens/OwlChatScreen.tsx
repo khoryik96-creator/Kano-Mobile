@@ -18,7 +18,7 @@ import { TRenderEngineProvider, RenderHTMLConfigProvider, RenderHTMLSource } fro
 
 import { useKano, useOwlDraft } from '../state';
 import { theme } from '../theme';
-import { activeApiKey } from '../../src/ui';
+import { activeApiKey, owlClearPrompt } from '../../src/ui';
 import { AI_PROVIDER_META } from '../../src/core/ai';
 import { owlMarkdownToHtml, owlMessageId } from '../../src/core/owl';
 import type { OwlMessage } from '../../src/core/owl';
@@ -93,7 +93,7 @@ function OwlPending() {
 const keyOf = (m: OwlMessage) => owlMessageId(m);
 
 export function OwlChatScreen() {
-  const { owlMessages, ask, stopOwl, clearOwlChat, owlBusy, status, settings, setOwlStream } = useKano();
+  const { owlMessages, ask, stopOwl, clearOwlChat, owlBusy, status, settings, googleSignedIn, setOwlStream } = useKano();
   const [input, setInput] = useState('');
   const { width } = useWindowDimensions();
   const list = useRef<FlatList<OwlMessage>>(null);
@@ -173,7 +173,8 @@ export function OwlChatScreen() {
 
   const onClear = () => {
     if (!owlMessages.length || owlBusy) return;
-    Alert.alert('Clear chat history?', 'This permanently deletes the saved conversation on this phone.', [
+    // Same question as in Settings — including that the Drive backup goes too, when on.
+    Alert.alert('Clear chat history?', owlClearPrompt(owlMessages.length, settings.owlDriveSync && googleSignedIn), [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Clear', style: 'destructive', onPress: () => void clearOwlChat() },
     ]);

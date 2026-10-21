@@ -27,6 +27,13 @@ export interface NoteDraft {
   text: string;
   html?: string;
   importance?: number;
+  /**
+   * The version these edits are based on — the note as it was when the editor opened.
+   * Without it the draft is judged against whatever is stored NOW, which may have
+   * changed elsewhere meanwhile (or been deleted): then an untouched body looks edited
+   * (and loses its formatting), and a revived note loses its archived state and date.
+   */
+  base?: Note;
 }
 
 export function emptyDraft(): NoteDraft {
@@ -63,8 +70,9 @@ function commitRecord(state: NoteState, raw: unknown, now: number): NoteState {
  * Formatting the phone's plain-text editor can't reproduce — bold, italics, lists, links,
  * headings, colours… — as opposed to the bare paragraphs/line breaks every note has.
  * Editing the body of such a note on the phone necessarily saves it as plain text.
+ * (An inline style only counts inside a tag; "style=" typed in the text is just text.)
  */
-const RICH_MARKUP = /<(b|strong|i|em|u|s|strike|del|ins|mark|sub|sup|ul|ol|li|a|h[1-6]|blockquote|code|pre|img|table|font|hr)\b|\sstyle\s*=/i;
+const RICH_MARKUP = /<(b|strong|i|em|u|s|strike|del|ins|mark|sub|sup|ul|ol|li|a|h[1-6]|blockquote|code|pre|img|table|font|hr)\b|<[^>]*\sstyle\s*=/i;
 
 export function noteHasRichFormatting(note: Pick<Note, 'html'> | null | undefined): boolean {
   return !!note?.html && RICH_MARKUP.test(note.html);
@@ -92,26 +100,25 @@ export function commitDraft(state: NoteState, draft: NoteDraft, now: number = Da
   const tombstone = draft.id && !existing ? (state?.tombstones || []).find((t) => t.id === draft.id) : undefined;
   const nowIso = changeStamp(existing, now, tombstone ? Date.parse(tombstone.deletedAt) : 0);
   if (existing && !draftChangesNote(existing, draft)) return state;
-  const bodyChanged = !existing || (draft.text ?? '') !== (existing.text ?? '');
+  const base = draft.base ?? existing;
+  const body = String(draft.text ?? '');
+  const bodyChanged = !base || body !== (base.text ?? '');
   const raw = {
+    // Content comes from the draft, on top of the version it was based on; the stored
+    // note's own state (archived, reminders) wins over the base where it still exists.
+    ...(base || {}),
     ...(existing || {}),
     id: draft.id,
     title: draft.title,
     text: draft.text,
-    // Explicit html wins. If the body text wasn't touched, keep the note's own html —
+    // Explicit html wins. If the body text wasn't touched, keep the base's html —
     // regenerating it from plain text would strip the extension's formatting (bold,
-    // lists, links) from a note whose title or urgency was all that changed. Only an
-    // edited body is re-rendered, with line breaks preserved.
-    html:
-      draft.html !== undefined
-        ? draft.html
-        : !bodyChanged
-          ? existing?.html
-          : draft.text && draft.text.trim()
-            ? textToHtml(draft.text)
-            : existing?.html,
-    importance: draft.importance !== undefined ? draft.importance : existing?.importance,
-    createdAt: existing?.createdAt,
+    // lists, links) from a note whose title or urgency was all that changed. An edited
+    // body is re-rendered with its line breaks; an emptied one is emptied (keeping the
+    // old html would leave the extension showing the text you deleted).
+    html: draft.html !== undefined ? draft.html : !bodyChanged ? base?.html : body.trim() ? textToHtml(body) : '',
+    importance: draft.importance !== undefined ? draft.importance : (existing ?? base)?.importance,
+    createdAt: existing?.createdAt ?? base?.createdAt,
     updatedAt: nowIso,
   };
   // Drop an empty draft rather than committing a blank note.

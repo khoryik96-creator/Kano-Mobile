@@ -86,9 +86,8 @@ export function NoteEditorScreen() {
           { text: 'Save my version', value: 'ok' },
         ],
       );
-      return c === 'ok';
-    }
-    if (live && opened && live.updatedAt !== opened.updatedAt) {
+      if (c !== 'ok') return false;
+    } else if (live && opened && live.updatedAt !== opened.updatedAt) {
       const c = await choose(
         'Changed elsewhere',
         'This note was changed on another device or in the extension after you opened it. Saving replaces those changes with yours.',
@@ -99,7 +98,8 @@ export function NoteEditorScreen() {
       );
       if (c !== 'ok') return false;
     }
-    if (text !== initial.text && noteHasRichFormatting(live ?? opened)) {
+    // Judged against the version being edited (what the save is based on).
+    if (text !== initial.text && noteHasRichFormatting(opened)) {
       const c = await choose(
         'Remove formatting?',
         'This note has formatting from the Kano extension (bold, lists, links…). Text edited on the phone is saved as plain text, which removes that formatting everywhere.',
@@ -116,7 +116,9 @@ export function NoteEditorScreen() {
   // Write the edits; on failure say so and keep everything on screen.
   const persist = async (): Promise<boolean> => {
     try {
-      await saveNote({ id, title, text, importance });
+      // `base`: the save is judged against the version these edits started from, not
+      // whatever is stored now (which may have changed, or gone, meanwhile).
+      await saveNote({ id, title, text, importance, base: opened });
       return true;
     } catch (e) {
       Alert.alert("Couldn't save this note", errorText(e) + '\n\nYour text is still here — try again.');

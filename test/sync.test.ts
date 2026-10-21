@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { DriveClient, pushNotes, retrieveNotes, inspectCloud, CLOUD_SESSION_CHANGED_MESSAGE, KANO_NOTE_CLOUD_FILE_NAME, pushOwlChat } from '../src/core/sync';
-import { OWL_CHAT_FILE_NAME, mergeOwlChats } from '../src/core/owl';
+import { OWL_CHAT_FILE_NAME, mergeOwlChats, owlNextStamp, owlClearStamp, makeOwlMessage } from '../src/core/owl';
+import { sameNoteState } from '../src/core/notes';
 import type { OwlChatState, OwlMessage } from '../src/core/owl';
 import type { FetchLike, TokenProvider, DriveResponse, DriveRequestInit } from '../src/core/sync';
 
@@ -505,11 +506,98 @@ test('owl-sync: a write from another phone in between is merged, not overwritten
 
 test('owl-sync: merge keeps the newest 50, prefers the local copy, and is order-independent', () => {
   const many = Array.from({ length: 60 }, (_, i) => M('m' + i, 'user', 't' + i, new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString()));
-  const merged = mergeOwlChats(chat(many.slice(0, 40)), chat(many.slice(30)));
+  // The other phone's copies: equal content, different objects (as after a download).
+  const copies = many.map((m) => ({ ...m }));
+  const merged = mergeOwlChats(chat(many.slice(0, 40)), chat(copies.slice(30)));
   assert.equal(merged.messages.length, 50);
   assert.equal(merged.messages[0]!.id, 'm10');
   assert.equal(merged.messages[49]!.id, 'm59');
   assert.equal(merged.messages[20], many[30], 'reuses the first transcript’s object (rows keep identity)');
-  const flipped = mergeOwlChats(chat(many.slice(30)), chat(many.slice(0, 40)));
+  assert.equal(merged.messages[45], copies[55], 'messages only the other copy has are taken from it');
+  const flipped = mergeOwlChats(chat(copies.slice(30)), chat(many.slice(0, 40)));
   assert.deepEqual(flipped.messages.map((m) => m.id), merged.messages.map((m) => m.id));
+  assert.equal(flipped.messages[20], copies[30], 'whichever transcript comes first wins a shared id');
+});
+
+// ── Clock skew between phones ───────────────────────────────────────────────────────────
+
+test('owl-sync: a phone whose clock is behind still stamps after the chat it holds', () => {
+  const now = Date.parse('2026-10-01T10:00:00.000Z');
+  const ahead = M('b1', 'user', 'from a phone 5 min ahead', '2026-10-01T10:05:00.000Z');
+  assert.equal(owlNextStamp(chat([]), now), now, 'nothing ahead: now');
+  assert.equal(owlNextStamp(chat([ahead]), now), Date.parse(ahead.ts!) + 1, 'just after the newest message');
+  assert.equal(owlNextStamp(chat([], '2026-10-01T10:07:00.000Z'), now), Date.parse('2026-10-01T10:07:00.000Z') + 1, 'just after a clear');
+  const absurd = M('z', 'user', 'x', '+275760-09-13T00:00:00.000Z'); // the last moment a Date can hold
+  assert.doesNotThrow(() => new Date(owlNextStamp(chat([absurd]), now)).toISOString(), 'never an invalid date');
+
+  // A question asked on this phone sorts after what is on screen, not above it.
+  const q = makeOwlMessage('user', 'my question', 0, { now: owlNextStamp(chat([ahead]), now) });
+  assert.deepEqual(mergeOwlChats(chat([ahead]), chat([q])).messages.map((m) => m.id), ['b1', q.id]);
+});
+
+test('owl-sync: a clear on a phone whose clock is behind still clears everything', () => {
+  const now = Date.parse('2026-10-01T10:00:00.000Z');
+  const ahead = M('b1', 'user', 'secret, from a phone 5 min ahead', '2026-10-01T10:05:00.000Z');
+  const clearedAt = owlClearStamp(chat([ahead]), now);
+  const cleared = mergeOwlChats(chat([], clearedAt), chat([ahead]));
+  assert.deepEqual(cleared.messages, [], 'the other phone’s copy cannot bring it back');
+
+  // The next question — still on the slow clock — survives that clear.
+  const next = makeOwlMessage('user', 'next question', 0, { now: owlNextStamp(cleared, now + 1000) });
+  const merged = mergeOwlChats(chat([next], clearedAt), chat([ahead]));
+  assert.deepEqual(merged.messages.map((m) => m.text), ['next question']);
+});
+
+// ── No-op upload detection ──────────────────────────────────────────────────────────────
+
+test('sync: note-state equality is order-blind but never fooled by a repeated id', () => {
+  const x = note('x', '2026-08-01T00:00:00.000Z');
+  const y = note('y', '2026-08-02T00:00:00.000Z');
+  const S = (notes: object[], tombstones: object[] = []) => ({ notes, tombstones }) as never;
+  assert.equal(sameNoteState(S([x, y]), S([y, x])), true, 'order does not matter');
+  assert.equal(sameNoteState(S([x, y]), S([x, { ...y, title: 'changed' }])), false);
+  assert.equal(sameNoteState(S([x, y]), S([x, x])), false, 'b repeats x and lacks y');
+  assert.equal(sameNoteState(S([x, x]), S([x, y])), false);
+  const t = (id: string) => ({ id, deletedAt: '2026-08-03T00:00:00.000Z' });
+  assert.equal(sameNoteState(S([], [t('a'), t('b')]), S([], [t('b'), t('a')])), true);
+  assert.equal(sameNoteState(S([], [t('a'), t('b')]), S([], [t('a'), t('a')])), false, 'tombstones too');
+});
+
+// ── The extension's reminder fields must survive the phone ─────────────────────────────
+
+test('sync: reminders set in the extension survive a phone sync and a phone edit', async () => {
+  const drive = new FakeDrive();
+  const reminders = {
+    reminderAt: '2026-11-01T09:00:00.000Z',
+    reminderFiredAt: '',
+    reminderFallbackAt: '2026-11-01T09:05:00.000Z',
+    reminderNotificationStatus: 'scheduled',
+    reminderNotificationError: '',
+    reminderExpiredAt: '',
+    reminderExpiredReason: '',
+  };
+  // As the extension writes it: every reminder field present, unset ones as ''.
+  const fromExtension = { ...NOTE('r1', 'Call Sam', '2026-08-01T00:00:00.000Z'), ...reminders };
+  const id = drive.seed(KANO_NOTE_CLOUD_FILE_NAME, { schemaVersion: 3, notes: [fromExtension] });
+  const client = new DriveClient(drive.fetch, staticToken());
+
+  // The phone has its own note to push, so the upload really happens.
+  const pushed = await pushNotes(client, { localNotes: [NOTE('p1', 'phone note', '2026-08-02T00:00:00.000Z')], now: NOW });
+  assert.equal(pushed.uploaded, true);
+  const inDrive = JSON.parse(drive.get(id)!.content).notes.find((n: { id: string }) => n.id === 'r1');
+  assert.equal(inDrive.reminderAt, '2026-11-01T09:00:00.000Z', 'reminder kept in Drive');
+  assert.equal(inDrive.reminderNotificationStatus, 'scheduled');
+  assert.equal(inDrive.reminderFallbackAt, '2026-11-01T09:05:00.000Z');
+
+  // Editing the note on the phone keeps the reminder too.
+  const local = pushed.state.notes.find((n) => n.id === 'r1')!;
+  assert.equal(local.reminderAt, '2026-11-01T09:00:00.000Z', 'kept in the phone copy');
+  const edited = await pushNotes(client, {
+    localNotes: pushed.state.notes.map((n) => (n.id === 'r1' ? { ...n, title: 'Call Sam (moved)', updatedAt: '2026-08-03T00:00:00.000Z' } : n)),
+    now: NOW,
+  });
+  const afterEdit = JSON.parse(drive.get(id)!.content).notes.find((n: { id: string }) => n.id === 'r1');
+  assert.equal(afterEdit.title, 'Call Sam (moved)');
+  assert.equal(afterEdit.reminderAt, '2026-11-01T09:00:00.000Z', 'still there after a phone edit');
+  void edited;
 });

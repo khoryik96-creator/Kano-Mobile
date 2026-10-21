@@ -26,6 +26,8 @@ const SORTS: { value: NotesSort; label: string }[] = [
   { value: 'created', label: 'Created' },
 ];
 
+const errorText = (e: unknown) => String((e as Error)?.message || e || 'Unknown error');
+
 export function NotesListScreen() {
   const nav = useNavigation<any>();
   const { notes, syncNow, archiveNote, removeNote, syncBusy, status } = useKano();
@@ -41,7 +43,9 @@ export function NotesListScreen() {
     Alert.alert(note.title || 'Untitled', undefined, [
       {
         text: note.archived ? 'Unarchive' : 'Archive',
-        onPress: () => void archiveNote(note.id, !note.archived),
+        onPress: () => {
+          archiveNote(note.id, !note.archived).catch((e) => Alert.alert("Couldn't update this note", errorText(e)));
+        },
       },
       {
         text: 'Delete',
@@ -49,7 +53,13 @@ export function NotesListScreen() {
         onPress: () =>
           Alert.alert('Delete note?', 'This cannot be undone.', [
             { text: 'Cancel', style: 'cancel' },
-            { text: 'Delete', style: 'destructive', onPress: () => void removeNote(note.id) },
+            {
+              text: 'Delete',
+              style: 'destructive',
+              onPress: () => {
+                removeNote(note.id).catch((e) => Alert.alert("Couldn't delete this note", errorText(e)));
+              },
+            },
           ]),
       },
       { text: 'Cancel', style: 'cancel' },

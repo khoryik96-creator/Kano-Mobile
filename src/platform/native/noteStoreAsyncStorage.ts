@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { NoteState } from '../../core/notes';
 import { normalizeNotesList, normalizeNoteTombstones } from '../../core/notes';
+import { fnv1a36 } from '../../core/hash';
 import type { NoteStore } from '../noteStore';
 import { EMPTY_NOTE_STATE } from '../noteStore';
 
@@ -9,12 +10,15 @@ import { EMPTY_NOTE_STATE } from '../noteStore';
 // module); implements the port tested via InMemoryNoteStore.
 
 const STORAGE_KEY = 'kano.notes.state.v1';
-/** Where an unreadable copy of the notes is kept, so it is never simply overwritten. */
+/**
+ * Where unreadable copies of the notes are kept, so they are never simply overwritten:
+ * this prefix plus a hash of the copy (each different copy is kept, none twice).
+ */
 export const CORRUPT_NOTES_BACKUP_KEY = 'kano.notes.state.v1.unreadable';
 
 export class AsyncStorageNoteStore implements NoteStore {
-  /** Told when the stored notes couldn't be read (after a copy was kept). */
-  constructor(private readonly onUnreadable?: () => void) {}
+  /** Told when the stored notes couldn't be read, and whether a copy was kept. */
+  constructor(private readonly onUnreadable?: (info: { backedUp: boolean }) => void) {}
 
   async load(): Promise<NoteState> {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
@@ -28,13 +32,17 @@ export class AsyncStorageNoteStore implements NoteStore {
     } catch {
       // Unreadable (e.g. a write cut short). Reading it as "no notes" means the next
       // save overwrites it — taking with it any note that never reached Drive. Keep a
-      // copy first (once: a later failure mustn't replace the original with junk).
+      // copy first, under its own key: an earlier copy must neither be replaced by
+      // this one nor stop this one being kept.
+      const key = CORRUPT_NOTES_BACKUP_KEY + '.' + fnv1a36(raw);
+      let backedUp = false;
       try {
-        if (!(await AsyncStorage.getItem(CORRUPT_NOTES_BACKUP_KEY))) await AsyncStorage.setItem(CORRUPT_NOTES_BACKUP_KEY, raw);
+        if ((await AsyncStorage.getItem(key)) !== raw) await AsyncStorage.setItem(key, raw);
+        backedUp = true;
       } catch {
-        /* best effort */
+        /* best effort — and reported as not kept */
       }
-      this.onUnreadable?.();
+      this.onUnreadable?.({ backedUp });
       return EMPTY_NOTE_STATE;
     }
   }

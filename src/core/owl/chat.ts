@@ -43,9 +43,17 @@ export function newOwlMessageId(now: number = Date.now()): string {
   return 'owl_' + now.toString(36) + '_' + owlIdCounter.toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
-/** Build a chat message record. Trims text; stamps a timestamp and an id; marks `local`. */
-export function makeOwlMessage(role: OwlRole, text: unknown, cost = 0, opts: { local?: boolean } = {}): OwlMessage {
-  const now = Date.now();
+/**
+ * Build a chat message record. Trims text; stamps a timestamp (`opts.now`, default now)
+ * and an id; marks `local`.
+ */
+export function makeOwlMessage(
+  role: OwlRole,
+  text: unknown,
+  cost = 0,
+  opts: { local?: boolean; now?: number } = {},
+): OwlMessage {
+  const now = opts?.now ?? Date.now();
   const msg: OwlMessage = {
     id: newOwlMessageId(now),
     role,

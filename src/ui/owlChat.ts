@@ -8,7 +8,7 @@ import {
   buildOwlPrompt,
   makeOwlMessage,
   appendOwlMessage,
-  sanitizeOwlMessages,
+  normalizeOwlChatPayload,
 } from '../core/owl';
 
 // Presenter for the OwlChat screen (plan §2 src/ui) — the non-visual half of the ask
@@ -45,6 +45,11 @@ export interface SendOwlInput {
    * object keeps its identity — and its list row — stable for the whole turn.
    */
   userMessage?: OwlMessage;
+  /**
+   * When to stamp the messages this creates (default: now). The app passes a clock that
+   * never runs behind the chat it holds — see owlNextStamp.
+   */
+  clock?: () => number;
 }
 
 /** The notice for a reply the user (or a timeout) cut short. */
@@ -62,7 +67,7 @@ export async function sendOwlMessage(opts: SendOwlInput): Promise<SendOwlResult>
   const input = String((opts.userMessage ? opts.userMessage.text : opts.input) || '').trim();
   if (!input) return { messages: opts.messages, cost: 0, ok: false, error: 'Type a question for The Owl first' };
 
-  const turn = opts.userMessage ?? makeOwlMessage('user', input);
+  const turn = opts.userMessage ?? makeOwlMessage('user', input, 0, { now: opts.clock?.() });
   const history = Array.isArray(opts.messages) ? opts.messages : [];
   const withUser = history[history.length - 1] === turn ? history : appendOwlMessage(history, turn);
   try {
@@ -84,7 +89,8 @@ export async function sendOwlMessage(opts: SendOwlInput): Promise<SendOwlResult>
     const text = String(res.text || '').trim();
     if (!text) throw new Error('No text response returned from AI provider.');
     const cost = Number(res.usage?.costUsd || 0) || 0;
-    return { messages: appendOwlMessage(withUser, makeOwlMessage('assistant', text, cost)), cost, ok: true };
+    const reply = makeOwlMessage('assistant', text, cost, { now: opts.clock?.() });
+    return { messages: appendOwlMessage(withUser, reply), cost, ok: true };
   } catch (e) {
     // An aborted request surfaces as whatever the transport throws ("Aborted",
     // "Network request failed"…). Name it for what it was instead.
@@ -92,25 +98,18 @@ export async function sendOwlMessage(opts: SendOwlInput): Promise<SendOwlResult>
     const error = aborted
       ? opts.abortReason?.() || OWL_REPLY_STOPPED
       : String((e as Error)?.message || e || 'Unknown error');
-    const messages = appendOwlMessage(withUser, makeOwlMessage('assistant', 'Provider/error notice: ' + error, 0));
+    const notice = makeOwlMessage('assistant', 'Provider/error notice: ' + error, 0, { now: opts.clock?.() });
+    const messages = appendOwlMessage(withUser, notice);
     return { messages, cost: 0, ok: false, error };
   }
 }
 
 /**
- * Rebuild the Owl transcript from what was persisted. Storage is untrusted input as far
- * as rendering goes: a blob written by an older build, or truncated by a crash mid-write,
- * must yield a usable (possibly empty) transcript rather than a red screen. Keeps only
- * well-formed user/assistant turns, newest window only.
- */
-export function restoreOwlTranscript(raw: string | null | undefined): OwlMessage[] {
-  return restoreOwlChat(raw).messages;
-}
-
-/**
- * Rebuild the persisted chat — transcript plus the last-cleared marker. Reads both
- * formats: the current `{ v: 2, messages, clearedAt }` and the plain message array
- * that earlier builds saved.
+ * Rebuild the persisted chat — transcript plus the last-cleared marker. Storage is
+ * untrusted input as far as rendering goes: a blob written by an older build, or
+ * truncated by a crash mid-write, must yield a usable (possibly empty) chat rather than
+ * a red screen. Validated exactly like the Drive copy; reads both the current
+ * `{ v: 2, messages, clearedAt }` and the plain message array earlier builds saved.
  */
 export function restoreOwlChat(raw: string | null | undefined): OwlChatState {
   if (!raw) return { messages: [], clearedAt: '' };
@@ -120,10 +119,21 @@ export function restoreOwlChat(raw: string | null | undefined): OwlChatState {
   } catch {
     return { messages: [], clearedAt: '' };
   }
-  const list = Array.isArray(parsed) ? parsed : (parsed as { messages?: unknown } | null)?.messages;
-  const clearedRaw = !Array.isArray(parsed) ? (parsed as { clearedAt?: unknown } | null)?.clearedAt : '';
-  const clearedAt = typeof clearedRaw === 'string' && Number.isFinite(Date.parse(clearedRaw)) ? clearedRaw : '';
-  return { messages: sanitizeOwlMessages(list).slice(-OWL_MAX_VISIBLE_MESSAGES), clearedAt };
+  const chat = normalizeOwlChatPayload(Array.isArray(parsed) ? { messages: parsed } : parsed);
+  return { messages: chat.messages.slice(-OWL_MAX_VISIBLE_MESSAGES), clearedAt: chat.clearedAt };
+}
+
+/** The question asked before clearing the chat — the same on the Owl and Settings screens. */
+export function owlClearPrompt(count: number, backedUp: boolean): string {
+  return (
+    'This permanently deletes the ' +
+    count +
+    ' Owl message' +
+    (count === 1 ? '' : 's') +
+    ' saved on this phone' +
+    (backedUp ? ' and in your Google Drive backup (and on any other phone that syncs it)' : '') +
+    '. It does not affect your notes.'
+  );
 }
 
 /** The on-device format for the chat (see restoreOwlChat). */

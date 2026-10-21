@@ -16,9 +16,9 @@ import {
   reconcileAfterSync,
   settingsForStorage,
   restoreSettings,
-  restoreOwlTranscript,
   restoreOwlChat,
   serializeOwlChat,
+  owlClearPrompt,
   noteHasRichFormatting,
 } from '../src/ui';
 import { owlMessageId, makeOwlMessage } from '../src/core/owl';
@@ -254,17 +254,17 @@ test('ui/owlChat: a saved transcript restores; damaged entries are dropped, not 
     { role: 'user', text: 'hi', ts: '2026-10-01T00:00:00.000Z' },
     { role: 'assistant', text: 'Hello.', cost: 0.0001, ts: '2026-10-01T00:00:01.000Z' },
   ];
-  assert.deepEqual(restoreOwlTranscript(JSON.stringify(good)), good);
+  assert.deepEqual(restoreOwlChat(JSON.stringify(good)).messages, good);
 
   const damaged = JSON.stringify([...good, null, { role: 'system', text: 'x' }, { role: 'user' }, { role: 'user', text: '   ' }, 7]);
-  assert.deepEqual(restoreOwlTranscript(damaged), good, 'only well-formed turns survive');
+  assert.deepEqual(restoreOwlChat(damaged).messages, good, 'only well-formed turns survive');
 
-  assert.deepEqual(restoreOwlTranscript(null), []);
-  assert.deepEqual(restoreOwlTranscript('{"truncated'), [], 'a write cut short by a crash yields an empty chat, not a red screen');
-  assert.deepEqual(restoreOwlTranscript('{"role":"user"}'), [], 'not an array');
+  assert.deepEqual(restoreOwlChat(null).messages, []);
+  assert.deepEqual(restoreOwlChat('{"truncated').messages, [], 'a write cut short by a crash yields an empty chat, not a red screen');
+  assert.deepEqual(restoreOwlChat('{"role":"user"}').messages, [], 'not an array');
 
   const many = Array.from({ length: 80 }, (_, i) => ({ role: 'user', text: 'm' + i }));
-  const restored = restoreOwlTranscript(JSON.stringify(many));
+  const restored = restoreOwlChat(JSON.stringify(many)).messages;
   assert.equal(restored.length, 50, 'capped to the visible window');
   assert.equal(restored[49]!.text, 'm79', 'keeping the newest');
 });
@@ -281,7 +281,7 @@ test('ui/settings: restore survives values that would throw if coerced', () => {
 
 test('ui/owlChat: restore survives a poisoned cost field', () => {
   const raw = JSON.stringify([{ role: 'assistant', text: 'ok', cost: POISON }, { role: 'user', text: 'hi', cost: '5' }]);
-  assert.deepEqual(restoreOwlTranscript(raw), [
+  assert.deepEqual(restoreOwlChat(raw).messages, [
     { role: 'assistant', text: 'ok' },
     { role: 'user', text: 'hi' },
   ]);
@@ -437,4 +437,53 @@ test('ui/noteEditor: "save my version" of a note deleted elsewhere brings it bac
   const restored = commitDraft(deleted, { id: 'n1', title: 'Sam', text: 'kept', importance: 2 }, phoneClock);
   assert.deepEqual(restored.notes.map((n) => n.id), ['n1'], 'revived, not swallowed by the tombstone');
   assert.equal(restored.tombstones.length, 0, 'the tombstone it outdates is dropped');
+});
+
+// ── Saves are judged against the version being edited ─────────────────────────────────
+
+test('ui/noteEditor: emptying the body really empties it (the extension stops showing it)', () => {
+  const state = extensionNote();
+  const n = state.notes[0]!;
+  const after = commitDraft(state, { id: n.id, title: n.title, text: '', importance: 2, base: n }, NOW).notes[0]!;
+  assert.equal(after.text, '');
+  assert.ok(!after.html.includes('Sam'), 'old html is gone, not left behind for the extension to show');
+});
+
+test('ui/noteEditor: "save mine anyway" with only a new title keeps the edited version’s formatting', () => {
+  const opened = extensionNote().notes[0]!;
+  // Meanwhile the extension rewrote the body.
+  const live = { ...opened, text: 'changed elsewhere', html: '<p>changed elsewhere</p>', updatedAt: '2026-08-10T00:00:00.000Z' };
+  const state: NoteState = { notes: [live], tombstones: [] };
+  const saved = commitDraft(state, { id: opened.id, title: 'New title', text: opened.text, importance: 2, base: opened }, NOW).notes[0]!;
+  assert.equal(saved.title, 'New title');
+  assert.equal(saved.text, opened.text, 'my version of the body');
+  assert.equal(saved.html, RICH, 'with its formatting — not re-rendered as plain text');
+});
+
+test('ui/noteEditor: reviving a note deleted elsewhere keeps its archived state, date and formatting', () => {
+  const opened = { ...extensionNote().notes[0]!, archived: true, archivedAt: '2026-08-01T01:00:00.000Z' };
+  const deleted = deleteNote({ notes: [opened], tombstones: [] }, opened.id, Date.parse('2026-08-05T00:00:00.000Z'));
+  const revived = commitDraft(deleted, { id: opened.id, title: opened.title + '!', text: opened.text, importance: 2, base: opened }, NOW).notes[0]!;
+  assert.equal(revived.archived, true, 'still archived');
+  assert.equal(revived.createdAt, opened.createdAt, 'original created date');
+  assert.equal(revived.html, RICH, 'formatting kept');
+});
+
+test('ui/noteEditor: a style= in ordinary text is not mistaken for formatting', () => {
+  assert.equal(noteHasRichFormatting({ html: '<p>hair style = short</p>' }), false);
+  assert.equal(noteHasRichFormatting({ html: '<p style="color:red">x</p>' }), true);
+});
+
+test('ui/owlChat: messages are stamped by the given clock (a phone whose clock is behind)', async () => {
+  const at = Date.parse('2026-10-01T10:05:00.001Z');
+  const ok = await sendOwlMessage({ messages: [], input: 'hi', provider: 'claude', apiKey: 'k', fetchImpl: okFetch('hello'), clock: () => at });
+  assert.deepEqual(ok.messages.map((m) => m.ts), [new Date(at).toISOString(), new Date(at).toISOString()]);
+  const failFetch: AiFetch = async () => ({ status: 500, ok: false, text: async () => '{}' });
+  const failed = await sendOwlMessage({ messages: [], input: 'hi', provider: 'claude', apiKey: 'k', fetchImpl: failFetch, clock: () => at });
+  assert.equal(failed.messages[1]!.ts, new Date(at).toISOString(), 'the error notice too');
+});
+
+test('ui/owlChat: the clear question mentions the Drive backup only when there is one', () => {
+  assert.equal(owlClearPrompt(1, false), 'This permanently deletes the 1 Owl message saved on this phone. It does not affect your notes.');
+  assert.match(owlClearPrompt(3, true), /^This permanently deletes the 3 Owl messages saved on this phone and in your Google Drive backup/);
 });

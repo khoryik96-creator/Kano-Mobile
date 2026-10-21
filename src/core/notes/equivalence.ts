@@ -11,22 +11,30 @@ function canonical(note: Note): string {
   return JSON.stringify(Object.keys(rec).sort().map((k) => [k, rec[k]]));
 }
 
+/** id → canonical form; null if an id repeats (on either side — don't pretend to know). */
+function byId<T extends { id: unknown }>(list: T[], form: (x: T) => string): Map<string, string> | null {
+  const map = new Map<string, string>();
+  for (const x of list) {
+    const id = String(x.id);
+    if (map.has(id)) return null;
+    map.set(id, form(x));
+  }
+  return map;
+}
+
+function sameLists<T extends { id: unknown }>(a: T[], b: T[], form: (x: T) => string): boolean {
+  if (a.length !== b.length) return false;
+  const am = byId(a, form);
+  const bm = byId(b, form);
+  if (!am || !bm) return false;
+  for (const [id, value] of am) if (bm.get(id) !== value) return false;
+  return true;
+}
+
 /** True when both states hold exactly the same notes and tombstones. */
 export function sameNoteState(a: NoteState, b: NoteState): boolean {
-  const an = a?.notes || [];
-  const bn = b?.notes || [];
-  const at = a?.tombstones || [];
-  const bt = b?.tombstones || [];
-  if (an.length !== bn.length || at.length !== bt.length) return false;
-
-  const notes = new Map<string, string>();
-  for (const n of an) notes.set(String(n.id), canonical(n));
-  if (notes.size !== an.length) return false; // duplicate ids — don't pretend to know
-  for (const n of bn) if (notes.get(String(n.id)) !== canonical(n)) return false;
-
-  const tombs = new Map<string, string>();
-  for (const t of at) tombs.set(String(t.id), String(t.deletedAt));
-  if (tombs.size !== at.length) return false;
-  for (const t of bt) if (tombs.get(String(t.id)) !== String(t.deletedAt)) return false;
-  return true;
+  return (
+    sameLists(a?.notes || [], b?.notes || [], canonical) &&
+    sameLists(a?.tombstones || [], b?.tombstones || [], (t) => String(t.deletedAt))
+  );
 }

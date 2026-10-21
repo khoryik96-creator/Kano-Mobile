@@ -1,5 +1,6 @@
 import type { OwlMessage, OwlRole } from './chat';
 import { OWL_MAX_VISIBLE_MESSAGES } from './chat';
+import { fnv1a36 } from '../hash';
 
 // The Owl transcript as synced through Google Drive (mobile-only — the extension keeps
 // its Owl chat in browser storage and never reads this file). Pure, Node-tested logic:
@@ -22,18 +23,6 @@ export interface OwlChatState {
   clearedAt: string;
 }
 
-export const EMPTY_OWL_CHAT: OwlChatState = Object.freeze({ messages: [], clearedAt: '' }) as OwlChatState;
-
-/** FNV-1a, base36 — the same hash the notes identity uses. */
-function fnv36(seed: string): string {
-  let hash = 2166136261;
-  for (let i = 0; i < seed.length; i++) {
-    hash ^= seed.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-}
-
 /**
  * A message's identity: its own id, or — for messages saved by older builds, which had
  * none — a deterministic one from its content, so every device derives the same id for
@@ -41,12 +30,40 @@ function fnv36(seed: string): string {
  */
 export function owlMessageId(m: OwlMessage): string {
   if (typeof m?.id === 'string' && m.id) return m.id;
-  return 'owl_legacy_' + fnv36([m?.role, m?.ts, m?.text].map((x) => String(x ?? '')).join('|').slice(0, 2000));
+  return 'owl_legacy_' + fnv1a36([m?.role, m?.ts, m?.text].map((x) => String(x ?? '')).join('|').slice(0, 2000));
 }
 
 function ms(iso: unknown): number {
   const t = typeof iso === 'string' && iso ? Date.parse(iso) : NaN;
   return Number.isFinite(t) ? t : NaN;
+}
+
+/** The latest moment a JS Date can represent. */
+const MAX_DATE_MS = 8.64e15;
+
+/**
+ * When to stamp a new message: now — or, if this phone's clock is behind a message or a
+ * clear it already holds (another phone's clock running ahead), just after that. The
+ * merge orders messages by time and drops everything at or before the last clear, so a
+ * message stamped "earlier" would jump above the conversation, or vanish as if cleared.
+ */
+export function owlNextStamp(chat: OwlChatState, now: number = Date.now()): number {
+  let at = now;
+  const after = (iso: unknown) => {
+    const t = ms(iso);
+    if (Number.isFinite(t) && t >= at) at = t + 1;
+  };
+  after(chat?.clearedAt);
+  for (const m of chat?.messages || []) after(m?.ts);
+  return Math.min(at, MAX_DATE_MS);
+}
+
+/**
+ * When to mark a clear (see owlNextStamp): never before anything this phone holds, so
+ * the clear drops every message it can see — here, in Drive, and on other phones.
+ */
+export function owlClearStamp(chat: OwlChatState, now: number = Date.now()): string {
+  return new Date(owlNextStamp(chat, now)).toISOString();
 }
 
 /** The later of two ISO instants ('' if neither is a valid time). */

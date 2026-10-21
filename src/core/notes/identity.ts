@@ -1,4 +1,5 @@
 import type { Note, RawNote } from './model';
+import { fnv1a36 } from '../hash';
 
 // Stable note id — a faithful lift of kano_notes.js:kanoStableNoteIdFromRecord.
 //
@@ -16,10 +17,5 @@ export function stableNoteIdFromRecord(rec: RawNote | Note = {}): string {
     .map((x) => String(x ?? ''))
     .join('|')
     .slice(0, 1000);
-  let hash = 2166136261; // FNV offset basis
-  for (let i = 0; i < seed.length; i++) {
-    hash ^= seed.charCodeAt(i);
-    hash = Math.imul(hash, 16777619); // FNV prime
-  }
-  return 'note_' + (hash >>> 0).toString(36);
+  return 'note_' + fnv1a36(seed);
 }

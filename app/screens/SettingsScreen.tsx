@@ -4,7 +4,7 @@ import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 
 import { useKano } from '../state';
-import { validateApiKey } from '../../src/ui';
+import { validateApiKey, owlClearPrompt } from '../../src/ui';
 import { DRIVE_OAUTH_SCOPES } from '../../src/platform';
 import { GOOGLE_OAUTH, googleConfigured } from '../config';
 import { theme } from '../theme';
@@ -16,6 +16,7 @@ WebBrowser.maybeCompleteAuthSession();
 export function SettingsScreen() {
   const {
     settings,
+    googleSignedIn,
     updateSettings,
     completeGoogleSignIn,
     syncBusy,
@@ -27,7 +28,8 @@ export function SettingsScreen() {
     setOwlDriveSync,
     unreadableKeys,
   } = useKano();
-  const backedUp = settings.owlDriveSync && !!settings.googleEmail;
+  // Signed in is a stored session — the email label is best-effort and may be blank.
+  const backedUp = settings.owlDriveSync && googleSignedIn;
   const [provider, setProvider] = useState<AiProvider>(settings.provider);
   const [claudeApiKey, setClaudeApiKey] = useState(settings.claudeApiKey);
   const [deepSeekApiKey, setDeepSeekApiKey] = useState(settings.deepSeekApiKey);
@@ -93,31 +95,23 @@ export function SettingsScreen() {
 
   const onClearChat = () => {
     if (!owlMessages.length) return;
-    Alert.alert(
-      'Clear chat history?',
-      'This permanently deletes the ' +
-        owlMessages.length +
-        ' Owl messages saved on this phone' +
-        (backedUp ? ' and in your Google Drive backup (and on any other phone that syncs it)' : '') +
-        '. It does not affect your notes.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Clear', style: 'destructive', onPress: () => void clearOwlChat() },
-      ],
-    );
+    Alert.alert('Clear chat history?', owlClearPrompt(owlMessages.length, backedUp), [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear', style: 'destructive', onPress: () => void clearOwlChat() },
+    ]);
   };
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <Text style={styles.section}>Google Drive</Text>
-      {settings.googleEmail ? (
-        <Text style={styles.connected}>● Signed in as {settings.googleEmail}</Text>
+      {googleSignedIn ? (
+        <Text style={styles.connected}>● Signed in{settings.googleEmail ? ' as ' + settings.googleEmail : ''}</Text>
       ) : (
         <Text style={styles.hint}>Sign in to sync notes with the Kano extension.</Text>
       )}
       {!googleConfigured() ? <Text style={styles.warn}>Set EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID first (see docs/RUNNING_ON_DEVICE.md).</Text> : null}
       <Pressable style={[styles.btn, styles.primary]} onPress={() => void promptAsync()} disabled={syncBusy || !request || !googleConfigured()}>
-        <Text style={styles.primaryText}>{settings.googleEmail ? 'Re-sign in' : 'Sign in with Google'}</Text>
+        <Text style={styles.primaryText}>{googleSignedIn ? 'Re-sign in' : 'Sign in with Google'}</Text>
       </Pressable>
 
       <Text style={styles.section}>AI provider</Text>
@@ -158,7 +152,7 @@ export function SettingsScreen() {
         <View style={styles.switchText}>
           <Text style={styles.switchLabel}>Back up chat to Google Drive</Text>
           <Text style={styles.hint}>
-            {settings.googleEmail
+            {googleSignedIn
               ? "Keeps your Owl chat in your Drive's private app folder (not visible in Drive), so it comes back after a reinstall and stays in step across phones."
               : 'Sign in with Google above to back up your Owl chat.'}
           </Text>
