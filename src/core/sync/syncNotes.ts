@@ -1,5 +1,5 @@
 import type { Note, Tombstone, NoteState } from '../notes';
-import { mergeNoteState, normalizeCloudNotesPayload, normalizeCloudTombstonesPayload } from '../notes';
+import { mergeNoteState, normalizeCloudNotesPayload, normalizeCloudTombstonesPayload, sameNoteState } from '../notes';
 import type { DriveClient } from './driveClient';
 import type { DriveFileMeta, DriveError } from './types';
 import { buildCloudPayload } from './payload';
@@ -41,11 +41,13 @@ export interface PushOptions {
 export const CLOUD_SESSION_CHANGED_MESSAGE = 'Google account changed during sync. Please sync again.';
 
 export interface PushResult {
-  /** The merged state that was uploaded — persist this locally. */
+  /** The merged state (uploaded, or already in Drive) — persist this locally. */
   state: NoteState;
-  /** Drive file metadata for the written revision. */
+  /** Drive file metadata for the written revision (just the id when nothing was written). */
   file: DriveFileMeta;
   revision: number;
+  /** False when Drive already held exactly the merged notes, so nothing was written. */
+  uploaded: boolean;
 }
 
 /**
@@ -58,17 +60,27 @@ export interface PushResult {
  * retry converges rather than clobbering the concurrent write.
  */
 export async function pushNotes(client: DriveClient, options: PushOptions): Promise<PushResult> {
-  const { localNotes, localTombstones = [], revision = 0, savedByVersion, now, assertSession } = options;
+  const { localNotes, localTombstones = [], revision = 0, savedByVersion, assertSession } = options;
+  const now = options.now ?? Date.now();
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= MAX_CONFLICT_RETRIES; attempt++) {
     const remote = await client.downloadNotesWithMeta({ assertSession });
     const merged = mergeNoteState(localNotes, remote.payload, localTombstones, now);
+
+    // Nothing to say: Drive already holds exactly this. Mobile syncs on every launch
+    // and every return to the app, and rewriting an unchanged file each time wastes
+    // data and churns its ETag — which sends the extension's own saves into
+    // needless 412 conflict retries. (The extension only uploads after an edit.)
+    if (remote.fileId && remote.payload && sameNoteState(merged, mergeNoteState([], remote.payload, [], now))) {
+      return { state: merged, file: { id: remote.fileId }, revision: Number(revision || 0) || 0, uploaded: false };
+    }
+
     const payload = buildCloudPayload(merged.notes, revision, merged.tombstones, { savedByVersion, now });
     assertSession?.(); // last check before anything is written
     try {
       const file = await client.uploadNotes(payload, { fileId: remote.fileId, etag: remote.etag }, { assertSession });
-      return { state: merged, file, revision: Number(revision || 0) || 0 };
+      return { state: merged, file, revision: Number(revision || 0) || 0, uploaded: true };
     } catch (e) {
       lastError = e;
       if (Number((e as DriveError)?.status || 0) === 412 && attempt < MAX_CONFLICT_RETRIES) continue;

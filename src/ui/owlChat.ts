@@ -1,7 +1,15 @@
 import type { AiFetch, AiProvider, AiStreamTransport } from '../core/ai';
 import { callAiText, callAiTextStreaming } from '../core/ai';
 import type { OwlMessage, OwlPageContext } from '../core/owl';
-import { OWL_SYSTEM_PROMPT, OWL_MAX_VISIBLE_MESSAGES, buildOwlPrompt, makeOwlMessage, appendOwlMessage } from '../core/owl';
+import type { OwlChatState } from '../core/owl';
+import {
+  OWL_SYSTEM_PROMPT,
+  OWL_MAX_VISIBLE_MESSAGES,
+  buildOwlPrompt,
+  makeOwlMessage,
+  appendOwlMessage,
+  sanitizeOwlMessages,
+} from '../core/owl';
 
 // Presenter for the OwlChat screen (plan §2 src/ui) — the non-visual half of the ask
 // flow, a faithful lift of popup.js askKanoOwlChat minus the DOM: append the user turn,
@@ -31,9 +39,10 @@ export interface SendOwlInput {
    */
   abortReason?: () => string | undefined;
   /**
-   * The user's turn, if the caller already built (and displayed) it. Reusing the same
-   * object keeps its identity — and so its list key — stable from the moment it's shown
-   * to the moment the reply lands, so the row isn't torn down and rebuilt mid-turn.
+   * The user's turn, if the caller already built (and displayed) it. When given, it is
+   * the single source of truth: its text is the question asked (`input` is ignored),
+   * and it is appended only if `messages` doesn't already end with it. Reusing the same
+   * object keeps its identity — and its list row — stable for the whole turn.
    */
   userMessage?: OwlMessage;
 }
@@ -50,10 +59,12 @@ export interface SendOwlResult {
 
 /** Run one Owl turn. Pure except for the injected provider call; returns the new list. */
 export async function sendOwlMessage(opts: SendOwlInput): Promise<SendOwlResult> {
-  const input = String(opts.input || '').trim();
+  const input = String((opts.userMessage ? opts.userMessage.text : opts.input) || '').trim();
   if (!input) return { messages: opts.messages, cost: 0, ok: false, error: 'Type a question for The Owl first' };
 
-  const withUser = appendOwlMessage(opts.messages, opts.userMessage ?? makeOwlMessage('user', input));
+  const turn = opts.userMessage ?? makeOwlMessage('user', input);
+  const history = Array.isArray(opts.messages) ? opts.messages : [];
+  const withUser = history[history.length - 1] === turn ? history : appendOwlMessage(history, turn);
   try {
     const userText = buildOwlPrompt(input, {
       messages: withUser,
@@ -93,27 +104,29 @@ export async function sendOwlMessage(opts: SendOwlInput): Promise<SendOwlResult>
  * well-formed user/assistant turns, newest window only.
  */
 export function restoreOwlTranscript(raw: string | null | undefined): OwlMessage[] {
-  if (!raw) return [];
+  return restoreOwlChat(raw).messages;
+}
+
+/**
+ * Rebuild the persisted chat — transcript plus the last-cleared marker. Reads both
+ * formats: the current `{ v: 2, messages, clearedAt }` and the plain message array
+ * that earlier builds saved.
+ */
+export function restoreOwlChat(raw: string | null | undefined): OwlChatState {
+  if (!raw) return { messages: [], clearedAt: '' };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return [];
+    return { messages: [], clearedAt: '' };
   }
-  if (!Array.isArray(parsed)) return [];
-  const out: OwlMessage[] = [];
-  for (const m of parsed) {
-    if (!m || typeof m !== 'object') continue;
-    const role = (m as OwlMessage).role;
-    const text = (m as OwlMessage).text;
-    if ((role !== 'user' && role !== 'assistant') || typeof text !== 'string' || !text.trim()) continue;
-    const msg: OwlMessage = { role, text };
-    // typeof-checked, never coerced: Number() on a hostile object can throw.
-    const cost = (m as OwlMessage).cost;
-    if (typeof cost === 'number' && Number.isFinite(cost) && cost > 0) msg.cost = cost;
-    if (typeof (m as OwlMessage).ts === 'string') msg.ts = (m as OwlMessage).ts;
-    if ((m as OwlMessage).local === true) msg.local = true;
-    out.push(msg);
-  }
-  return out.slice(-OWL_MAX_VISIBLE_MESSAGES);
+  const list = Array.isArray(parsed) ? parsed : (parsed as { messages?: unknown } | null)?.messages;
+  const clearedRaw = !Array.isArray(parsed) ? (parsed as { clearedAt?: unknown } | null)?.clearedAt : '';
+  const clearedAt = typeof clearedRaw === 'string' && Number.isFinite(Date.parse(clearedRaw)) ? clearedRaw : '';
+  return { messages: sanitizeOwlMessages(list).slice(-OWL_MAX_VISIBLE_MESSAGES), clearedAt };
+}
+
+/** The on-device format for the chat (see restoreOwlChat). */
+export function serializeOwlChat(state: OwlChatState): string {
+  return JSON.stringify({ v: 2, messages: state.messages, clearedAt: state.clearedAt || '' });
 }

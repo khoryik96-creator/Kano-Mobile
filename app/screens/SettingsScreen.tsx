@@ -14,8 +14,20 @@ import type { AiProvider } from '../../src/core/ai';
 WebBrowser.maybeCompleteAuthSession();
 
 export function SettingsScreen() {
-  const { settings, updateSettings, completeGoogleSignIn, syncBusy, status, owlMessages, owlBusy, clearOwlChat, setOwlStream, unreadableKeys } =
-    useKano();
+  const {
+    settings,
+    updateSettings,
+    completeGoogleSignIn,
+    syncBusy,
+    status,
+    owlMessages,
+    owlBusy,
+    clearOwlChat,
+    setOwlStream,
+    setOwlDriveSync,
+    unreadableKeys,
+  } = useKano();
+  const backedUp = settings.owlDriveSync && !!settings.googleEmail;
   const [provider, setProvider] = useState<AiProvider>(settings.provider);
   const [claudeApiKey, setClaudeApiKey] = useState(settings.claudeApiKey);
   const [deepSeekApiKey, setDeepSeekApiKey] = useState(settings.deepSeekApiKey);
@@ -83,7 +95,11 @@ export function SettingsScreen() {
     if (!owlMessages.length) return;
     Alert.alert(
       'Clear chat history?',
-      'This permanently deletes the ' + owlMessages.length + ' Owl messages saved on this phone. It does not affect your notes.',
+      'This permanently deletes the ' +
+        owlMessages.length +
+        ' Owl messages saved on this phone' +
+        (backedUp ? ' and in your Google Drive backup (and on any other phone that syncs it)' : '') +
+        '. It does not affect your notes.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Clear', style: 'destructive', onPress: () => void clearOwlChat() },
@@ -137,6 +153,26 @@ export function SettingsScreen() {
           thumbColor={theme.surface}
         />
       </View>
+
+      <View style={styles.switchRow}>
+        <View style={styles.switchText}>
+          <Text style={styles.switchLabel}>Back up chat to Google Drive</Text>
+          <Text style={styles.hint}>
+            {settings.googleEmail
+              ? "Keeps your Owl chat in your Drive's private app folder (not visible in Drive), so it comes back after a reinstall and stays in step across phones."
+              : 'Sign in with Google above to back up your Owl chat.'}
+          </Text>
+        </View>
+        <Switch
+          value={settings.owlDriveSync}
+          onValueChange={(v) => void setOwlDriveSync(v)}
+          trackColor={{ true: theme.primary, false: theme.border }}
+          thumbColor={theme.surface}
+        />
+      </View>
+      {!settings.owlDriveSync ? (
+        <Text style={styles.hint}>Off: the copy already in Drive is kept. Clear the chat first if you want that gone too.</Text>
+      ) : null}
 
       <Text style={styles.label}>Chat history</Text>
       <Text style={styles.hint}>

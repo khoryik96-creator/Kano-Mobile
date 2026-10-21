@@ -103,7 +103,12 @@ First build takes a while (it compiles the native project). After that, `npm sta
   be sent back to the sign-in button unless you revoke access or change your password.
 - **It syncs on its own** when the app launches and each time it returns to the
   foreground (at most once a minute), plus shortly after any note edit. The **Sync**
-  button stays for when you want to force it.
+  button stays for when you want to force it. A sync that finds nothing new doesn't
+  rewrite the Drive file.
+- **The Owl chat is backed up to Drive** (Settings → *Back up chat to Google Drive*,
+  on by default) in its own file, `kano-owl-chat.json`, in the same private app folder
+  as your notes. It comes back after a reinstall and stays in step across phones.
+  *Clear chat history* clears it everywhere. The extension's Owl chat is separate.
 
 If anything errors on the first run, copy the Metro/red-screen message to me and I'll fix
 it — the JS/TS is written but this is its first execution on a real device.

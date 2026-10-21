@@ -4,12 +4,12 @@
 
 export { selectNotesList } from './notesList';
 export type { NotesListQuery, NotesListView, NotesSort } from './notesList';
-export { emptyDraft, noteToDraft, commitDraft, setArchived, deleteNote } from './noteEditor';
+export { emptyDraft, noteToDraft, commitDraft, setArchived, deleteNote, noteHasRichFormatting, draftChangesNote } from './noteEditor';
 export type { NoteDraft } from './noteEditor';
 export { IMPORTANCE_LEVELS, importanceLevel } from './importance';
 export type { ImportanceLevel } from './importance';
 export { reconcileAfterSync } from './syncReconcile';
-export { sendOwlMessage, restoreOwlTranscript, OWL_REPLY_STOPPED } from './owlChat';
+export { sendOwlMessage, restoreOwlTranscript, restoreOwlChat, serializeOwlChat, OWL_REPLY_STOPPED } from './owlChat';
 export type { SendOwlInput, SendOwlResult } from './owlChat';
 export {
   defaultSettings,

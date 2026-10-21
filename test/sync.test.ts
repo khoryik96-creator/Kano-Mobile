@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DriveClient, pushNotes, retrieveNotes, inspectCloud, CLOUD_SESSION_CHANGED_MESSAGE, KANO_NOTE_CLOUD_FILE_NAME } from '../src/core/sync';
+import { DriveClient, pushNotes, retrieveNotes, inspectCloud, CLOUD_SESSION_CHANGED_MESSAGE, KANO_NOTE_CLOUD_FILE_NAME, pushOwlChat } from '../src/core/sync';
+import { OWL_CHAT_FILE_NAME, mergeOwlChats } from '../src/core/owl';
+import type { OwlChatState, OwlMessage } from '../src/core/owl';
 import type { FetchLike, TokenProvider, DriveResponse, DriveRequestInit } from '../src/core/sync';
 
 // Offline integration test for core/sync.
@@ -68,6 +70,11 @@ class FakeDrive {
 
   get(id: string): StoredFile | undefined {
     return this.files.get(id);
+  }
+
+  /** The (first) stored file with this name. */
+  byName(name: string): StoredFile | undefined {
+    return [...this.files.values()].find((f) => f.name === name);
   }
 
   /** Delete a file outright (e.g. the user reset Drive, or another client recreated it). */
@@ -385,4 +392,124 @@ test('sync: a sign-in that lands while the upload fetches its token stops the re
   assert.equal(tokenCalls, 2, 'reached the upload');
   assert.equal(drive.calls.upload, 0, 'but no request was issued');
   assert.equal(drive.calls.find, 1);
+});
+
+// ── No-op uploads ─────────────────────────────────────────────────────────────────────
+
+test('sync: a push with nothing new does not rewrite the Drive file', async () => {
+  const drive = new FakeDrive();
+  const client = new DriveClient(drive.fetch, staticToken());
+  const local = [NOTE('a', 'one', '2026-08-01T00:00:00.000Z')];
+
+  const first = await pushNotes(client, { localNotes: local, now: NOW });
+  assert.equal(first.uploaded, true, 'first push creates the file');
+  const id = first.file.id;
+  const etagBefore = drive.get(id)!.etag;
+
+  drive.calls = { find: 0, download: 0, upload: 0 };
+  const second = await pushNotes(client, { localNotes: first.state.notes, localTombstones: first.state.tombstones, now: NOW });
+  assert.equal(second.uploaded, false, 'unchanged → no upload');
+  assert.equal(drive.calls.upload, 0);
+  assert.equal(drive.get(id)!.etag, etagBefore, 'the ETag is untouched, so the extension sees no change');
+  assert.deepEqual(second.state.notes.map((n) => n.id), ['a']);
+
+  // …but a real change still goes up.
+  const third = await pushNotes(client, { localNotes: [...first.state.notes, NOTE('b', 'two', '2026-08-02T00:00:00.000Z')], now: NOW });
+  assert.equal(third.uploaded, true);
+});
+
+// ── Owl chat ↔ Drive (Option A: mobile backup + sync between phones) ──────────────────
+
+const M = (id: string, role: 'user' | 'assistant', text: string, ts: string): OwlMessage => ({ id, role, text, ts });
+const chat = (messages: OwlMessage[], clearedAt = ''): OwlChatState => ({ messages, clearedAt });
+
+test('owl-sync: first push backs the chat up; an unchanged one writes nothing', async () => {
+  const drive = new FakeDrive();
+  const client = new DriveClient(drive.fetch, staticToken(), { fileName: OWL_CHAT_FILE_NAME });
+  const local = chat([M('m1', 'user', 'hi', '2026-10-01T00:00:00.000Z'), M('m2', 'assistant', 'Hello.', '2026-10-01T00:00:01.000Z')]);
+
+  const first = await pushOwlChat(client, { local, now: NOW });
+  assert.equal(first.uploaded, true);
+  assert.equal(drive.calls.upload, 1);
+
+  const again = await pushOwlChat(client, { local: first.state, now: NOW });
+  assert.equal(again.uploaded, false, 'same chat → no upload');
+  assert.equal(drive.calls.upload, 1);
+});
+
+test('owl-sync: an empty chat never creates a file', async () => {
+  const drive = new FakeDrive();
+  const client = new DriveClient(drive.fetch, staticToken(), { fileName: OWL_CHAT_FILE_NAME });
+  const r = await pushOwlChat(client, { local: chat([]), now: NOW });
+  assert.equal(r.uploaded, false);
+  assert.equal(drive.calls.upload, 0);
+});
+
+test('owl-sync: two phones end up with the same merged conversation', async () => {
+  const drive = new FakeDrive();
+  const phoneA = new DriveClient(drive.fetch, staticToken(), { fileName: OWL_CHAT_FILE_NAME });
+  const phoneB = new DriveClient(drive.fetch, staticToken(), { fileName: OWL_CHAT_FILE_NAME });
+
+  const a = chat([M('a1', 'user', 'from A', '2026-10-01T10:00:00.000Z')]);
+  const b = chat([M('b1', 'user', 'from B', '2026-10-01T09:00:00.000Z')]);
+  await pushOwlChat(phoneA, { local: a, now: NOW });
+  const rb = await pushOwlChat(phoneB, { local: b, now: NOW });
+  assert.deepEqual(rb.state.messages.map((m) => m.id), ['b1', 'a1'], 'union, oldest first');
+  const ra = await pushOwlChat(phoneA, { local: a, now: NOW });
+  assert.deepEqual(ra.state.messages.map((m) => m.id), ['b1', 'a1'], 'phone A now has B’s message too');
+});
+
+test('owl-sync: clearing on one phone clears it everywhere — the old copy cannot resurrect it', async () => {
+  const drive = new FakeDrive();
+  const phoneA = new DriveClient(drive.fetch, staticToken(), { fileName: OWL_CHAT_FILE_NAME });
+  const phoneB = new DriveClient(drive.fetch, staticToken(), { fileName: OWL_CHAT_FILE_NAME });
+  const old = chat([M('m1', 'user', 'secret candidate', '2026-10-01T10:00:00.000Z')]);
+  await pushOwlChat(phoneA, { local: old, now: NOW });
+
+  // Phone A clears; phone B still holds the old conversation.
+  await pushOwlChat(phoneA, { local: chat([], '2026-10-02T00:00:00.000Z'), now: NOW });
+  const rb = await pushOwlChat(phoneB, { local: old, now: NOW });
+  assert.deepEqual(rb.state.messages, [], 'B’s stale copy is dropped, not re-uploaded');
+  assert.equal(rb.state.clearedAt, '2026-10-02T00:00:00.000Z');
+
+  // A message written after the clear survives it.
+  const after = await pushOwlChat(phoneB, { local: chat([M('m9', 'user', 'new', '2026-10-03T00:00:00.000Z')]), now: NOW });
+  assert.deepEqual(after.state.messages.map((m) => m.id), ['m9']);
+});
+
+test('owl-sync: a write from another phone in between is merged, not overwritten', async () => {
+  const drive = new FakeDrive();
+  const phoneA = new DriveClient(drive.fetch, staticToken(), { fileName: OWL_CHAT_FILE_NAME });
+  await pushOwlChat(phoneA, { local: chat([M('a1', 'user', 'first', '2026-10-01T10:00:00.000Z')]), now: NOW });
+
+  // Phone B writes between A's download and A's upload, so A's If-Match fails (412).
+  drive.beforeNextPatch = () => {
+    const file = drive.byName(OWL_CHAT_FILE_NAME)!;
+    const payload = JSON.parse(file.content);
+    payload.messages.push(M('b1', 'user', 'from B', '2026-10-01T11:00:00.000Z'));
+    file.content = JSON.stringify(payload);
+    file.version += 1;
+    file.etag = `etag-${file.id}-v${file.version}`;
+  };
+  drive.calls = { find: 0, download: 0, upload: 0 };
+  const r = await pushOwlChat(phoneA, {
+    local: chat([M('a1', 'user', 'first', '2026-10-01T10:00:00.000Z'), M('a2', 'assistant', 'reply', '2026-10-01T12:00:00.000Z')]),
+    now: NOW,
+  });
+  assert.equal(drive.calls.upload, 2, 'the first upload was rejected (412) and retried');
+  assert.equal(r.uploaded, true);
+  assert.deepEqual(r.state.messages.map((m) => m.id), ['a1', 'b1', 'a2'], 'B’s message kept, A’s added');
+  const stored = JSON.parse(drive.byName(OWL_CHAT_FILE_NAME)!.content);
+  assert.deepEqual(stored.messages.map((m: OwlMessage) => m.id), ['a1', 'b1', 'a2'], 'and that is what Drive holds');
+});
+
+test('owl-sync: merge keeps the newest 50, prefers the local copy, and is order-independent', () => {
+  const many = Array.from({ length: 60 }, (_, i) => M('m' + i, 'user', 't' + i, new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString()));
+  const merged = mergeOwlChats(chat(many.slice(0, 40)), chat(many.slice(30)));
+  assert.equal(merged.messages.length, 50);
+  assert.equal(merged.messages[0]!.id, 'm10');
+  assert.equal(merged.messages[49]!.id, 'm59');
+  assert.equal(merged.messages[20], many[30], 'reuses the first transcript’s object (rows keep identity)');
+  const flipped = mergeOwlChats(chat(many.slice(30)), chat(many.slice(0, 40)));
+  assert.deepEqual(flipped.messages.map((m) => m.id), merged.messages.map((m) => m.id));
 });

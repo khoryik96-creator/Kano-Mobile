@@ -13,3 +13,4 @@ export {
   normalizeCloudTombstonesPayload,
 } from './normalize';
 export { sortNotes, resolveNotesAndTombstones, mergeNotesForCommit, mergeNoteState } from './merge';
+export { sameNoteState } from './equivalence';
