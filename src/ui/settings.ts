@@ -14,10 +14,12 @@ export interface SettingsState {
   googleEmail: string;
   /** Stream Owl replies token-by-token. Off by default, as in the extension. */
   owlStream: boolean;
+  /** Back the Owl chat up to Google Drive (and sync it between phones). On by default. */
+  owlDriveSync: boolean;
 }
 
 export function defaultSettings(): SettingsState {
-  return { provider: 'claude', claudeApiKey: '', deepSeekApiKey: '', userName: '', googleEmail: '', owlStream: false };
+  return { provider: 'claude', claudeApiKey: '', deepSeekApiKey: '', userName: '', googleEmail: '', owlStream: false, owlDriveSync: true };
 }
 
 export interface KeyValidation {
@@ -52,6 +54,7 @@ export function normalizeSettings(state: SettingsState): SettingsState {
     userName: normalizeOwlUserName(state.userName),
     googleEmail: String(state.googleEmail || '').trim(),
     owlStream: state.owlStream === true,
+    owlDriveSync: state.owlDriveSync !== false,
   };
 }
 
@@ -85,6 +88,7 @@ export function restoreSettings(
         if (typeof parsed.userName === 'string') plain.userName = parsed.userName;
         if (typeof parsed.googleEmail === 'string') plain.googleEmail = parsed.googleEmail;
         if (typeof parsed.owlStream === 'boolean') plain.owlStream = parsed.owlStream;
+        if (typeof parsed.owlDriveSync === 'boolean') plain.owlDriveSync = parsed.owlDriveSync;
       }
     } catch {
       /* corrupt blob — keep defaults rather than failing start-up */

@@ -9,6 +9,7 @@ export {
   OWL_MAX_CONTEXT_MESSAGES,
   normalizeOwlUserName,
   makeOwlMessage,
+  newOwlMessageId,
   appendOwlMessage,
   lastOwlReply,
   owlRecentChatForPrompt,
@@ -16,3 +17,17 @@ export {
 export type { OwlRole, OwlMessage } from './chat';
 export { OWL_SYSTEM_PROMPT, buildOwlPrompt } from './prompt';
 export type { OwlPageContext, BuildOwlPromptOptions } from './prompt';
+export {
+  OWL_CHAT_FILE_NAME,
+  OWL_CHAT_SCHEMA,
+  OWL_CHAT_SCHEMA_VERSION,
+  owlMessageId,
+  owlNextStamp,
+  owlClearStamp,
+  sanitizeOwlMessages,
+  mergeOwlChats,
+  sameOwlChat,
+  buildOwlChatPayload,
+  normalizeOwlChatPayload,
+} from './chatSync';
+export type { OwlChatState, OwlChatPayload } from './chatSync';

@@ -26,3 +26,5 @@ export { DriveClient } from './driveClient';
 export type { DriveCallOptions } from './driveClient';
 export { pushNotes, retrieveNotes, inspectCloud, CLOUD_SESSION_CHANGED_MESSAGE } from './syncNotes';
 export type { PushOptions, PushResult, RetrieveResult, InspectResult } from './syncNotes';
+export { pushOwlChat } from './syncOwl';
+export type { OwlPushOptions, OwlPushResult } from './syncOwl';

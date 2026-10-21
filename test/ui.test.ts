@@ -16,8 +16,12 @@ import {
   reconcileAfterSync,
   settingsForStorage,
   restoreSettings,
-  restoreOwlTranscript,
+  restoreOwlChat,
+  serializeOwlChat,
+  owlClearPrompt,
+  noteHasRichFormatting,
 } from '../src/ui';
+import { owlMessageId, makeOwlMessage } from '../src/core/owl';
 import type { NoteState } from '../src/core/notes';
 import type { AiFetch } from '../src/core/ai';
 
@@ -250,17 +254,17 @@ test('ui/owlChat: a saved transcript restores; damaged entries are dropped, not 
     { role: 'user', text: 'hi', ts: '2026-10-01T00:00:00.000Z' },
     { role: 'assistant', text: 'Hello.', cost: 0.0001, ts: '2026-10-01T00:00:01.000Z' },
   ];
-  assert.deepEqual(restoreOwlTranscript(JSON.stringify(good)), good);
+  assert.deepEqual(restoreOwlChat(JSON.stringify(good)).messages, good);
 
   const damaged = JSON.stringify([...good, null, { role: 'system', text: 'x' }, { role: 'user' }, { role: 'user', text: '   ' }, 7]);
-  assert.deepEqual(restoreOwlTranscript(damaged), good, 'only well-formed turns survive');
+  assert.deepEqual(restoreOwlChat(damaged).messages, good, 'only well-formed turns survive');
 
-  assert.deepEqual(restoreOwlTranscript(null), []);
-  assert.deepEqual(restoreOwlTranscript('{"truncated'), [], 'a write cut short by a crash yields an empty chat, not a red screen');
-  assert.deepEqual(restoreOwlTranscript('{"role":"user"}'), [], 'not an array');
+  assert.deepEqual(restoreOwlChat(null).messages, []);
+  assert.deepEqual(restoreOwlChat('{"truncated').messages, [], 'a write cut short by a crash yields an empty chat, not a red screen');
+  assert.deepEqual(restoreOwlChat('{"role":"user"}').messages, [], 'not an array');
 
   const many = Array.from({ length: 80 }, (_, i) => ({ role: 'user', text: 'm' + i }));
-  const restored = restoreOwlTranscript(JSON.stringify(many));
+  const restored = restoreOwlChat(JSON.stringify(many)).messages;
   assert.equal(restored.length, 50, 'capped to the visible window');
   assert.equal(restored[49]!.text, 'm79', 'keeping the newest');
 });
@@ -277,8 +281,209 @@ test('ui/settings: restore survives values that would throw if coerced', () => {
 
 test('ui/owlChat: restore survives a poisoned cost field', () => {
   const raw = JSON.stringify([{ role: 'assistant', text: 'ok', cost: POISON }, { role: 'user', text: 'hi', cost: '5' }]);
-  assert.deepEqual(restoreOwlTranscript(raw), [
+  assert.deepEqual(restoreOwlChat(raw).messages, [
     { role: 'assistant', text: 'ok' },
     { role: 'user', text: 'hi' },
   ]);
+});
+
+test('ui/owlChat: the question already on screen is reused in the final transcript (no remount)', async () => {
+  const shown = { role: 'user' as const, text: 'Which stack?', ts: '2026-10-20T00:00:00.000Z', cost: 0 };
+  const res = await sendOwlMessage({
+    messages: [],
+    input: 'Which stack?',
+    provider: 'claude',
+    apiKey: 'sk-ant-x',
+    fetchImpl: okFetch('Go.'),
+    userMessage: shown,
+  });
+  assert.equal(res.messages[0], shown, 'the same object, so its list key and row survive the turn');
+  assert.equal(res.messages[1]!.role, 'assistant');
+});
+
+test('ui/owlChat: userMessage is the single source of the question, and is never appended twice', async () => {
+  const shown = makeOwlMessage('user', 'What about Rust?');
+  const seenPrompts: string[] = [];
+  const fetchImpl: AiFetch = async (_url, init) => {
+    seenPrompts.push(String(init?.body || ''));
+    return okFetch('Rust is fine.')('', init);
+  };
+  // The caller passes the transcript that ALREADY ends with the shown question.
+  const res = await sendOwlMessage({
+    messages: [shown],
+    input: 'a different, stale input',
+    provider: 'claude',
+    apiKey: 'sk-ant-x',
+    fetchImpl,
+    userMessage: shown,
+  });
+  assert.deepEqual(res.messages.map((m) => m.role), ['user', 'assistant'], 'no duplicate question');
+  assert.equal(res.messages[0], shown);
+  assert.match(seenPrompts[0]!, /What about Rust\?/, 'the shown question is what was asked');
+  assert.doesNotMatch(seenPrompts[0]!, /stale input/);
+});
+
+test('ui/owlChat: new messages carry unique ids; old ones get stable derived ids', () => {
+  const a = makeOwlMessage('user', 'x');
+  const b = makeOwlMessage('user', 'x');
+  assert.ok(a.id && b.id && a.id !== b.id, 'unique even when created in the same millisecond');
+  const legacy = { role: 'user' as const, text: 'old', ts: '2026-09-01T00:00:00.000Z' };
+  assert.equal(owlMessageId(legacy), owlMessageId({ ...legacy }), 'same content → same id on every device');
+  assert.notEqual(owlMessageId(legacy), owlMessageId({ ...legacy, text: 'other' }));
+});
+
+test('ui/owlChat: the saved chat round-trips, and the older array format still loads', () => {
+  const state = { messages: [makeOwlMessage('user', 'hi')], clearedAt: '2026-10-01T00:00:00.000Z' };
+  const back = restoreOwlChat(serializeOwlChat(state));
+  assert.equal(back.clearedAt, state.clearedAt);
+  assert.equal(back.messages[0]!.id, state.messages[0]!.id, 'ids survive a restart');
+
+  const legacy = JSON.stringify([{ role: 'user', text: 'from an older build', ts: '2026-09-01T00:00:00.000Z' }]);
+  assert.deepEqual(restoreOwlChat(legacy), {
+    messages: [{ role: 'user', text: 'from an older build', ts: '2026-09-01T00:00:00.000Z' }],
+    clearedAt: '',
+  });
+  assert.deepEqual(restoreOwlChat('{"v":2,"messages":"nope","clearedAt":{"x":1}}'), { messages: [], clearedAt: '' });
+});
+
+// ── Editing an extension note on the phone ────────────────────────────────────────────
+
+const RICH = '<p>Call <b>Sam</b> about the <a href="https://x.test">Go role</a></p><ul><li>salary</li></ul>';
+
+function extensionNote(): NoteState {
+  return {
+    notes: [
+      {
+        id: 'n1', title: 'Sam', text: 'Call Sam about the Go role\nsalary', html: RICH,
+        createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T00:00:00.000Z',
+        importance: 2, archived: false, archivedAt: '',
+      },
+    ],
+    tombstones: [],
+  };
+}
+
+test('ui/noteEditor: saving an untouched note changes nothing (no newer copy to win the sync)', () => {
+  const state = extensionNote();
+  const n = state.notes[0]!;
+  const after = commitDraft(state, { id: n.id, title: n.title, text: n.text, importance: 2 }, LATER);
+  assert.equal(after, state, 'same state object — nothing written');
+});
+
+test('ui/noteEditor: changing only the title or urgency keeps the extension formatting', () => {
+  const state = extensionNote();
+  const n = state.notes[0]!;
+  const retitled = commitDraft(state, { id: n.id, title: 'Sam (Go)', text: n.text, importance: 2 }, LATER).notes[0]!;
+  assert.equal(retitled.html, RICH, 'bold, link and list survive');
+  assert.equal(retitled.title, 'Sam (Go)');
+  assert.equal(retitled.updatedAt, new Date(LATER).toISOString());
+
+  const urgent = commitDraft(state, { id: n.id, title: n.title, text: n.text, importance: 4 }, LATER).notes[0]!;
+  assert.equal(urgent.html, RICH);
+  assert.equal(urgent.importance, 4);
+});
+
+test('ui/noteEditor: editing the body is the one case that saves plain text', () => {
+  const state = extensionNote();
+  const n = state.notes[0]!;
+  const edited = commitDraft(state, { id: n.id, title: n.title, text: 'Call Sam tomorrow', importance: 2 }, LATER).notes[0]!;
+  assert.equal(edited.html, '<p>Call Sam tomorrow</p>');
+});
+
+test('ui/noteEditor: rich formatting is detected; plain paragraphs are not', () => {
+  assert.equal(noteHasRichFormatting({ html: RICH }), true);
+  assert.equal(noteHasRichFormatting({ html: '<p style="color:red">x</p>' }), true, 'colour counts');
+  assert.equal(noteHasRichFormatting({ html: '<p>line one<br>line two</p>' }), false);
+  assert.equal(noteHasRichFormatting({ html: '<div>plain</div><div><br></div>' }), false);
+  assert.equal(noteHasRichFormatting({ html: '' }), false);
+});
+
+// ── Clock skew: a change made here must never come out "older" than what it changed ──
+
+test('ui/noteEditor: an edit applies even when this phone’s clock is behind the note', () => {
+  const state = extensionNote(); // written at 2026-08-01T00:00:00Z
+  const n = state.notes[0]!;
+  const phoneClock = Date.parse('2026-07-31T23:58:00.000Z'); // two minutes slow
+  const edited = commitDraft(state, { id: n.id, title: 'Renamed', text: n.text, importance: 2 }, phoneClock).notes[0]!;
+  assert.equal(edited.title, 'Renamed', 'not silently discarded as "older"');
+  assert.equal(edited.updatedAt, '2026-08-01T00:00:00.001Z', 'stamped just after the version it edited');
+
+  const archived = setArchived(state, n.id, true, phoneClock).notes[0]!;
+  assert.equal(archived.archived, true);
+});
+
+test('ui/noteEditor: a delete sticks even when this phone’s clock is behind the note', () => {
+  const state = extensionNote();
+  const n = state.notes[0]!;
+  const phoneClock = Date.parse('2026-07-31T23:58:00.000Z');
+  const after = deleteNote(state, n.id, phoneClock);
+  assert.equal(after.tombstones[0]!.deletedAt, n.updatedAt, 'tombstone is not older than the note');
+  // Merging the old copy back (e.g. from the extension's file) must not revive it.
+  const revived = reconcileAfterSync({ notes: state.notes, tombstones: [] }, after, LATER);
+  assert.equal(revived.notes.length, 0, 'still deleted');
+});
+
+test('ui/noteEditor: archiving an already-archived note is a no-op', () => {
+  const state = extensionNote();
+  const once = setArchived(state, 'n1', true, NOW);
+  assert.equal(setArchived(once, 'n1', true, LATER), once);
+});
+
+test('ui/noteEditor: "save my version" of a note deleted elsewhere brings it back', () => {
+  const state = extensionNote();
+  // Deleted on a laptop whose clock is ahead of this phone's.
+  const deleted = deleteNote(state, 'n1', Date.parse('2026-08-02T00:00:00.000Z'));
+  const phoneClock = Date.parse('2026-08-01T12:00:00.000Z');
+  const restored = commitDraft(deleted, { id: 'n1', title: 'Sam', text: 'kept', importance: 2 }, phoneClock);
+  assert.deepEqual(restored.notes.map((n) => n.id), ['n1'], 'revived, not swallowed by the tombstone');
+  assert.equal(restored.tombstones.length, 0, 'the tombstone it outdates is dropped');
+});
+
+// ── Saves are judged against the version being edited ─────────────────────────────────
+
+test('ui/noteEditor: emptying the body really empties it (the extension stops showing it)', () => {
+  const state = extensionNote();
+  const n = state.notes[0]!;
+  const after = commitDraft(state, { id: n.id, title: n.title, text: '', importance: 2, base: n }, NOW).notes[0]!;
+  assert.equal(after.text, '');
+  assert.ok(!after.html.includes('Sam'), 'old html is gone, not left behind for the extension to show');
+});
+
+test('ui/noteEditor: "save mine anyway" with only a new title keeps the edited version’s formatting', () => {
+  const opened = extensionNote().notes[0]!;
+  // Meanwhile the extension rewrote the body.
+  const live = { ...opened, text: 'changed elsewhere', html: '<p>changed elsewhere</p>', updatedAt: '2026-08-10T00:00:00.000Z' };
+  const state: NoteState = { notes: [live], tombstones: [] };
+  const saved = commitDraft(state, { id: opened.id, title: 'New title', text: opened.text, importance: 2, base: opened }, NOW).notes[0]!;
+  assert.equal(saved.title, 'New title');
+  assert.equal(saved.text, opened.text, 'my version of the body');
+  assert.equal(saved.html, RICH, 'with its formatting — not re-rendered as plain text');
+});
+
+test('ui/noteEditor: reviving a note deleted elsewhere keeps its archived state, date and formatting', () => {
+  const opened = { ...extensionNote().notes[0]!, archived: true, archivedAt: '2026-08-01T01:00:00.000Z' };
+  const deleted = deleteNote({ notes: [opened], tombstones: [] }, opened.id, Date.parse('2026-08-05T00:00:00.000Z'));
+  const revived = commitDraft(deleted, { id: opened.id, title: opened.title + '!', text: opened.text, importance: 2, base: opened }, NOW).notes[0]!;
+  assert.equal(revived.archived, true, 'still archived');
+  assert.equal(revived.createdAt, opened.createdAt, 'original created date');
+  assert.equal(revived.html, RICH, 'formatting kept');
+});
+
+test('ui/noteEditor: a style= in ordinary text is not mistaken for formatting', () => {
+  assert.equal(noteHasRichFormatting({ html: '<p>hair style = short</p>' }), false);
+  assert.equal(noteHasRichFormatting({ html: '<p style="color:red">x</p>' }), true);
+});
+
+test('ui/owlChat: messages are stamped by the given clock (a phone whose clock is behind)', async () => {
+  const at = Date.parse('2026-10-01T10:05:00.001Z');
+  const ok = await sendOwlMessage({ messages: [], input: 'hi', provider: 'claude', apiKey: 'k', fetchImpl: okFetch('hello'), clock: () => at });
+  assert.deepEqual(ok.messages.map((m) => m.ts), [new Date(at).toISOString(), new Date(at).toISOString()]);
+  const failFetch: AiFetch = async () => ({ status: 500, ok: false, text: async () => '{}' });
+  const failed = await sendOwlMessage({ messages: [], input: 'hi', provider: 'claude', apiKey: 'k', fetchImpl: failFetch, clock: () => at });
+  assert.equal(failed.messages[1]!.ts, new Date(at).toISOString(), 'the error notice too');
+});
+
+test('ui/owlChat: the clear question mentions the Drive backup only when there is one', () => {
+  assert.equal(owlClearPrompt(1, false), 'This permanently deletes the 1 Owl message saved on this phone. It does not affect your notes.');
+  assert.match(owlClearPrompt(3, true), /^This permanently deletes the 3 Owl messages saved on this phone and in your Google Drive backup/);
 });

@@ -9,6 +9,12 @@ export const OWL_MAX_CONTEXT_MESSAGES = 12;
 export type OwlRole = 'user' | 'assistant';
 
 export interface OwlMessage {
+  /**
+   * Stable identity, minted when the message is created. Lets the same message be
+   * recognised across devices (Drive chat sync) and keeps its list row stable. Messages
+   * saved by older builds have none; owlMessageId derives a deterministic one.
+   */
+  id?: string;
   role: OwlRole;
   text: string;
   cost?: number;
@@ -29,9 +35,32 @@ export function normalizeOwlUserName(value: unknown): string {
     .slice(0, 60);
 }
 
-/** Build a chat message record. Trims text; stamps a timestamp; marks `local`. */
-export function makeOwlMessage(role: OwlRole, text: unknown, cost = 0, opts: { local?: boolean } = {}): OwlMessage {
-  const msg: OwlMessage = { role, text: String(text || '').trim(), cost: Number(cost || 0), ts: new Date().toISOString() };
+let owlIdCounter = 0;
+
+/** A fresh, practically-unique message id: time + per-process counter + randomness. */
+export function newOwlMessageId(now: number = Date.now()): string {
+  owlIdCounter = (owlIdCounter + 1) % 1679616; // 36^4
+  return 'owl_' + now.toString(36) + '_' + owlIdCounter.toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+/**
+ * Build a chat message record. Trims text; stamps a timestamp (`opts.now`, default now)
+ * and an id; marks `local`.
+ */
+export function makeOwlMessage(
+  role: OwlRole,
+  text: unknown,
+  cost = 0,
+  opts: { local?: boolean; now?: number } = {},
+): OwlMessage {
+  const now = opts?.now ?? Date.now();
+  const msg: OwlMessage = {
+    id: newOwlMessageId(now),
+    role,
+    text: String(text || '').trim(),
+    cost: Number(cost || 0),
+    ts: new Date(now).toISOString(),
+  };
   if (opts && opts.local) msg.local = true;
   return msg;
 }

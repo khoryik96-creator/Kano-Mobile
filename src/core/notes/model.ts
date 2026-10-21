@@ -18,7 +18,28 @@ export interface Note {
   importance: number;
   archived: boolean;
   archivedAt: string;
+  // Reminder state the extension keeps on each note (kanoNormalizeNotesList). Mobile has
+  // no reminders UI, but it must carry these through untouched: dropping them meant
+  // every upload from the phone erased the extension's reminders from Drive.
+  reminderAt?: string;
+  reminderFiredAt?: string;
+  reminderFallbackAt?: string;
+  reminderNotificationStatus?: string;
+  reminderNotificationError?: string;
+  reminderExpiredAt?: string;
+  reminderExpiredReason?: string;
 }
+
+/** The extension's reminder fields, in its normalizer's order. */
+export const NOTE_REMINDER_FIELDS = [
+  'reminderAt',
+  'reminderFiredAt',
+  'reminderFallbackAt',
+  'reminderNotificationStatus',
+  'reminderNotificationError',
+  'reminderExpiredAt',
+  'reminderExpiredReason',
+] as const;
 
 /** A deletion marker. Retained 90 days so a delete propagates across clients. */
 export interface Tombstone {

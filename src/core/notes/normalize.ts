@@ -1,5 +1,5 @@
 import type { Note, Tombstone, RawNote, RawTombstone } from './model';
-import { TOMBSTONE_RETENTION_MS } from './model';
+import { TOMBSTONE_RETENTION_MS, NOTE_REMINDER_FIELDS } from './model';
 import { stableNoteIdFromRecord } from './identity';
 
 // Normalization — lifts of kano_notes.js plus the STRUCTURAL form of
@@ -26,7 +26,7 @@ function normalizeOne(rec: RawNote, nowIso: string): Note | null {
   const rawHtml = String(rec.html || '');
   const rawText = String(rec.text || '').replace(/\s+$/, '');
   if (!rawText && !String(rec.title || '').trim() && !rawHtml) return null;
-  return {
+  const note: Note = {
     id: String(rec.id || stableNoteIdFromRecord(rec)),
     title: String(rec.title || rawText.split('\n')[0] || '').slice(0, 90),
     text: rawText,
@@ -37,6 +37,15 @@ function normalizeOne(rec: RawNote, nowIso: string): Note | null {
     archived: !!rec.archived,
     archivedAt: String(rec.archivedAt || ''),
   };
+  // Carry the extension's reminder fields through (it normalizes each as
+  // String(x || '')). Only set ones are copied: the extension reads a missing field as
+  // '' anyway, so this is lossless — and notes without reminders keep exactly the
+  // contract shape the shared fixtures pin.
+  for (const field of NOTE_REMINDER_FIELDS) {
+    const v = rec[field];
+    if (typeof v === 'string' && v) note[field] = v;
+  }
+  return note;
 }
 
 /**
