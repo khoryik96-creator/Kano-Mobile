@@ -3,7 +3,7 @@ import { AppState } from 'react-native';
 
 import type { NoteState } from '../src/core/notes';
 import { sameNoteState } from '../src/core/notes';
-import type { OwlChatState, OwlMessage, OwlPageContext } from '../src/core/owl';
+import type { OwlChatState, OwlMessage } from '../src/core/owl';
 import {
   appendOwlMessage,
   makeOwlMessage,
@@ -12,6 +12,7 @@ import {
   owlNextStamp,
   owlClearStamp,
   OWL_CHAT_FILE_NAME,
+  OWL_MAX_IMAGES_PER_MESSAGE,
 } from '../src/core/owl';
 import type { FetchLike } from '../src/core/sync';
 import { DriveClient, pushNotes, pushOwlChat, retrieveNotes, CLOUD_SESSION_CHANGED_MESSAGE } from '../src/core/sync';
@@ -24,7 +25,15 @@ import {
   EMPTY_NOTE_STATE,
 } from '../src/platform';
 import type { GoogleSession } from '../src/platform';
-import { KeychainSecureStore, AsyncStorageNoteStore, xhrStreamTransport } from '../src/platform/native';
+import {
+  KeychainSecureStore,
+  AsyncStorageNoteStore,
+  xhrStreamTransport,
+  keepOwlImage,
+  readOwlImage,
+  pruneOwlImages,
+} from '../src/platform/native';
+import type { PendingOwlImage } from '../src/platform/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GOOGLE_OAUTH } from './config';
 import {
@@ -138,7 +147,8 @@ interface KanoContextValue {
   archiveNote: (id: string, archived: boolean) => Promise<void>;
   syncNow: (options?: SyncOptions) => Promise<void>;
   completeGoogleSignIn: (session: GoogleSession) => Promise<void>;
-  ask: (input: string, pageContext?: OwlPageContext | null) => Promise<void>;
+  /** Ask The Owl: a question, with images (up to OWL_MAX_IMAGES_PER_MESSAGE), or both. */
+  ask: (input: string, images?: PendingOwlImage[]) => Promise<void>;
   /** Stop the reply The Owl is composing (it ends as "Reply stopped."). */
   stopOwl: () => void;
   clearOwlChat: () => Promise<void>;
@@ -217,6 +227,16 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
   // Points at the newest syncNow (assigned below). Declared first so syncNow itself can
   // hand off a re-run, and long-lived listeners never capture a stale closure.
   const syncRef = useRef<(options?: SyncOptions) => Promise<void>>(async () => {});
+  // Images being added to the chat right now — filed, but not yet in the transcript.
+  const owlImagesInFlight = useRef(new Set<string>());
+
+  // Delete image files no message refers to any more (cleared, or scrolled out of the
+  // 50-message window). Only once the stored chat has been read: until then we don't
+  // know which images it holds.
+  const pruneImages = useCallback(() => {
+    if (!owlLoaded.current) return;
+    void pruneOwlImages((id) => owlImagesInFlight.current.has(id) || owlRef.current.some((m) => m.images?.some((img) => img.id === id)));
+  }, []);
 
   // Report unreadable saved notes (the store keeps a copy before anything overwrites it).
   // Declared before the start-up load so it is in place for the first read.
@@ -276,6 +296,7 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
           owlClearedAt.current = restored.clearedAt;
           setOwlMessages(restored.messages);
           owlLoaded.current = true;
+          pruneImages(); // leftovers from a chat cleared on another phone, or a crash
         } else {
           failed.push('chat history');
         }
@@ -294,7 +315,7 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
         setReady(true);
       }
     })();
-  }, [commitSettings]);
+  }, [commitSettings, pruneImages]);
 
   // Mirror the transcript into a ref so `ask` never reads a stale closure.
   useEffect(() => {
@@ -361,8 +382,9 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
       owlClearedAt.current = merged.clearedAt;
       setOwlMessages(merged.messages);
       await persistOwl(merged.messages, owlGen.current);
+      pruneImages(); // a clear from another phone takes this phone's images with it
     },
-    [persistOwl],
+    [persistOwl, pruneImages],
   );
 
   // ── Push to Drive when signed in; reconcile the merged result. Best-effort. ──
@@ -607,9 +629,10 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
   );
 
   const ask = useCallback(
-    async (input: string, pageContext: OwlPageContext | null = null) => {
+    async (input: string, images: PendingOwlImage[] = []) => {
       const question = String(input || '').trim();
-      if (!question) return;
+      const attached = images.slice(0, OWL_MAX_IMAGES_PER_MESSAGE);
+      if (!question && !attached.length) return;
       const current = settingsRef.current;
       const provider = current.provider;
       const apiKey = activeApiKey(current);
@@ -618,6 +641,25 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       setOwlBusy(true);
+
+      // Stoppable, and never endless: RN's networking has no timeouts of its own, so a
+      // stalled request would otherwise leave the Owl "thinking" until the app is killed.
+      // Set up first: the Stop button shows from here on, and a tap must count even while
+      // the images are still being filed (sendOwlMessage then sends nothing).
+      const run: { controller: AbortController; reason?: string } = { controller: new AbortController() };
+      owlRun.current = run;
+      const ceiling = setTimeout(() => {
+        run.reason = OWL_TIMEOUT_MESSAGE;
+        run.controller.abort();
+      }, OWL_REPLY_TIMEOUT_MS);
+
+      // The pictures now belong to the chat: move them out of the cache before the bubble
+      // that shows them appears. Until the message is in the transcript they're marked
+      // in flight, so a tidy-up running meanwhile leaves them alone.
+      for (const p of attached) owlImagesInFlight.current.add(p.image.id);
+      const filed = await Promise.all(attached.map((p) => keepOwlImage(p).then(() => true, () => false)));
+      const imageNotKept = filed.includes(false);
+
       // Snapshot the conversation identity: if the user clears the chat while the
       // provider is thinking, this reply belongs to a conversation that no longer
       // exists and must not resurrect it.
@@ -631,11 +673,14 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
 
       // Show — and save — the question straight away. It used to appear only once the
       // whole reply was back, and was gone if the app closed in the meantime.
-      const userTurn = makeOwlMessage('user', question, 0, { now: stamp() });
+      const userTurn = makeOwlMessage('user', question, 0, { now: stamp(), images: attached.map((p) => p.image) });
       const shown = appendOwlMessage(history, userTurn);
       owlRef.current = shown;
+      for (const p of attached) owlImagesInFlight.current.delete(p.image.id);
       setOwlMessages(shown);
       void persistOwl(shown, gen);
+      // The question's own images are sent from memory; earlier ones are read back.
+      const fresh = new Map(attached.map((p) => [p.image.id, p.base64]));
 
       // Streaming: repaint the growing reply, throttled.
       const streaming = current.owlStream;
@@ -651,15 +696,6 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
         }, OWL_DRAFT_FLUSH_MS);
       };
 
-      // Stoppable, and never endless: RN's networking has no timeouts of its own, so a
-      // stalled request would otherwise leave the Owl "thinking" until the app is killed.
-      const run: { controller: AbortController; reason?: string } = { controller: new AbortController() };
-      owlRun.current = run;
-      const ceiling = setTimeout(() => {
-        run.reason = OWL_TIMEOUT_MESSAGE;
-        run.controller.abort();
-      }, OWL_REPLY_TIMEOUT_MS);
-
       let result;
       try {
         // sendOwlMessage appends the user turn itself and never throws: a provider
@@ -671,7 +707,7 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
           apiKey,
           fetchImpl: nativeFetch,
           userName: current.userName,
-          pageContext,
+          loadImage: async (image) => fresh.get(image.id) ?? (await readOwlImage(image)),
           signal: run.controller.signal,
           abortReason: () => run.reason,
           userMessage: userTurn, // the very bubble already on screen — no remount
@@ -706,15 +742,20 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
       // screen, and the next successful write (which saves the whole transcript)
       // catches it up.
       const saved = await persistOwl(finished, gen);
+      pruneImages(); // images of messages the 50-message window just let go
       const outcome = result.ok
         ? 'The Owl replied' + (result.cost ? ' · $' + result.cost.toFixed(6) : '')
         : result.error || '';
-      // The save warning goes FIRST: the status line can clip, and this is the part that
-      // tells you the conversation won't survive a restart.
-      setStatus(saved || !owlLoaded.current ? outcome : "Couldn't save this chat on the phone · " + outcome);
+      // Save warnings go FIRST: the status line can clip, and they are the part that tells
+      // you something won't survive a restart.
+      setStatus(
+        (saved || !owlLoaded.current ? '' : "Couldn't save this chat on the phone · ") +
+          (imageNotKept ? "Couldn't keep the image on this phone · " : '') +
+          outcome,
+      );
       scheduleOwlSync();
     },
-    [persistOwl, scheduleOwlSync],
+    [persistOwl, scheduleOwlSync, pruneImages],
   );
 
   const stopOwl = useCallback(() => {
@@ -743,9 +784,10 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
     setOwlMessages([]);
     setOwlDraft(null);
     setStatus('Chat history cleared');
+    pruneImages();
     if (settingsRef.current.owlDriveSync) owlClearOwed.current = true;
     scheduleOwlSync();
-  }, [scheduleOwlSync]);
+  }, [scheduleOwlSync, pruneImages]);
 
   // Each part is written independently, and the keys are read back. A settings save
   // used to stop at its first error (Android refuses to store an empty secret, i.e. the

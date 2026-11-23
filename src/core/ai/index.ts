@@ -12,7 +12,11 @@ export type {
   AiTextResult,
   AiJsonResult,
   AiCallOptions,
+  AiImage,
+  AiImageMediaType,
 } from './types';
+export { AI_IMAGE_MEDIA_TYPES, claudeUserContent, deepSeekUserContent } from './content';
+export type { ClaudeUserContent, DeepSeekUserContent } from './content';
 export {
   CLAUDE_MODEL,
   DEEPSEEK_MODEL,

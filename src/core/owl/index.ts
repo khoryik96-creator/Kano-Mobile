@@ -7,14 +7,19 @@ export { owlPlainText, owlStripFormatting, owlInlineMarkdown, owlMarkdownToHtml 
 export {
   OWL_MAX_VISIBLE_MESSAGES,
   OWL_MAX_CONTEXT_MESSAGES,
+  OWL_MAX_IMAGES_PER_MESSAGE,
+  OWL_MAX_PROMPT_IMAGES,
   normalizeOwlUserName,
   makeOwlMessage,
   newOwlMessageId,
+  newOwlImageId,
+  isOwlImageId,
+  owlContextMessages,
   appendOwlMessage,
   lastOwlReply,
   owlRecentChatForPrompt,
 } from './chat';
-export type { OwlRole, OwlMessage } from './chat';
+export type { OwlRole, OwlMessage, OwlImage } from './chat';
 export { OWL_SYSTEM_PROMPT, buildOwlPrompt } from './prompt';
 export type { OwlPageContext, BuildOwlPromptOptions } from './prompt';
 export {
@@ -25,6 +30,7 @@ export {
   owlNextStamp,
   owlClearStamp,
   sanitizeOwlMessages,
+  sanitizeOwlImages,
   mergeOwlChats,
   sameOwlChat,
   buildOwlChatPayload,

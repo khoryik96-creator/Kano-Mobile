@@ -12,16 +12,28 @@ import {
   Alert,
   ActivityIndicator,
   Linking,
+  Image,
+  Modal,
+  ScrollView,
 } from 'react-native';
 import type { ListRenderItem, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { TRenderEngineProvider, RenderHTMLConfigProvider, RenderHTMLSource } from 'react-native-render-html';
 
 import { useKano, useOwlDraft } from '../state';
 import { theme } from '../theme';
+import { MicButton, useDictation } from '../dictation';
 import { activeApiKey, owlClearPrompt } from '../../src/ui';
 import { AI_PROVIDER_META } from '../../src/core/ai';
-import { owlMarkdownToHtml, owlMessageId } from '../../src/core/owl';
-import type { OwlMessage } from '../../src/core/owl';
+import { owlMarkdownToHtml, owlMessageId, OWL_MAX_IMAGES_PER_MESSAGE } from '../../src/core/owl';
+import type { OwlImage, OwlMessage } from '../../src/core/owl';
+import { pickOwlImages, discardOwlImage, owlImageUri } from '../../src/platform/native';
+import type { OwlImageSource, PendingOwlImage } from '../../src/platform/native';
+
+const ADD_IMAGE = require('../../assets/owl/image-add.png');
+const CLOSE = require('../../assets/owl/close.png');
+const IMAGE_MISSING = require('../../assets/owl/image-off.png');
+
+const errorText = (e: unknown) => String((e as Error)?.message || e || 'Unknown error');
 
 /** Within this many px of the newest message counts as "reading the latest". */
 const FOLLOW_SLOP_PX = 32;
@@ -57,17 +69,87 @@ const OwlReply = memo(function OwlReply({ text, width }: { text: string; width: 
   return <RenderHTMLSource contentWidth={width - 48} source={source} />;
 });
 
-const OwlRow = memo(function OwlRow({ item, width }: { item: OwlMessage; width: number }) {
+/**
+ * One image in a message. The picture is a file on the phone that attached it; a chat
+ * synced from another phone has the record but not the file, so that shows a stand-in.
+ */
+const OwlImageView = memo(function OwlImageView({
+  image,
+  width,
+  height,
+  onOpen,
+}: {
+  image: OwlImage;
+  width: number;
+  height: number;
+  onOpen: (uri: string) => void;
+}) {
+  const uri = owlImageUri(image);
+  const [missing, setMissing] = useState(!uri);
+  const source = useMemo(() => (uri ? { uri } : null), [uri]);
+  if (missing || !source) {
+    return (
+      <View style={[styles.imageMissing, { width, height }]} accessibilityLabel="Image not on this phone">
+        <Image source={IMAGE_MISSING} style={styles.imageMissingIcon} />
+        <Text style={styles.imageMissingText}>Not on this phone</Text>
+      </View>
+    );
+  }
+  return (
+    <Pressable onPress={() => onOpen(source.uri)} accessibilityRole="imagebutton" accessibilityLabel="Open image">
+      <Image source={source} style={[styles.image, { width, height }]} resizeMode="cover" onError={() => setMissing(true)} />
+    </Pressable>
+  );
+});
+
+/** A message's images: one shown at its own shape, several as a grid of squares. */
+function OwlMessageImages({ images, width, onOpen }: { images: OwlImage[]; width: number; onOpen: (uri: string) => void }) {
+  const box = Math.min(260, width * 0.62);
+  if (images.length === 1) {
+    const img = images[0]!;
+    const ratio = img.width > 0 && img.height > 0 ? img.height / img.width : 1;
+    const h = Math.max(80, Math.min(box * ratio, 320));
+    return <OwlImageView image={img} width={box} height={h} onOpen={onOpen} />;
+  }
+  const cell = Math.floor((box - 6) / 2);
+  return (
+    <View style={[styles.imageGrid, { width: box }]}>
+      {images.map((img) => (
+        <OwlImageView key={img.id} image={img} width={cell} height={cell} onOpen={onOpen} />
+      ))}
+    </View>
+  );
+}
+
+const OwlRow = memo(function OwlRow({ item, width, onOpenImage }: { item: OwlMessage; width: number; onOpenImage: (uri: string) => void }) {
   return (
     <View style={[styles.msg, item.role === 'user' ? styles.user : styles.assistant]}>
       <Text style={styles.meta}>
         {item.role === 'user' ? 'You' : 'The Owl'}
         {item.cost ? ' · $' + item.cost.toFixed(6) : ''}
       </Text>
-      {item.role === 'assistant' ? <OwlReply text={item.text} width={width} /> : <Text style={styles.userText}>{item.text}</Text>}
+      {item.images?.length ? <OwlMessageImages images={item.images} width={width} onOpen={onOpenImage} /> : null}
+      {item.role === 'assistant' ? (
+        <OwlReply text={item.text} width={width} />
+      ) : item.text ? (
+        <Text style={[styles.userText, item.images?.length ? styles.userTextAfterImages : null]}>{item.text}</Text>
+      ) : null}
     </View>
   );
 });
+
+/** A picked image waiting to be sent, with a button to take it back out. */
+function PendingThumb({ item, onRemove }: { item: PendingOwlImage; onRemove: (item: PendingOwlImage) => void }) {
+  const source = useMemo(() => ({ uri: item.uri }), [item.uri]);
+  return (
+    <View style={styles.pending}>
+      <Image source={source} style={styles.pendingImage} resizeMode="cover" />
+      <Pressable style={styles.pendingRemove} onPress={() => onRemove(item)} hitSlop={8} accessibilityLabel="Remove image">
+        <Image source={CLOSE} style={styles.pendingRemoveIcon} />
+      </Pressable>
+    </View>
+  );
+}
 
 /**
  * The reply being composed, under the newest message while The Owl works. The only
@@ -97,6 +179,22 @@ export function OwlChatScreen() {
   const [input, setInput] = useState('');
   const { width } = useWindowDimensions();
   const list = useRef<FlatList<OwlMessage>>(null);
+  // Images picked for the next question, and whether some are still being converted.
+  const [pending, setPending] = useState<PendingOwlImage[]>([]);
+  const [preparing, setPreparing] = useState(false);
+  // The image opened full screen, if any.
+  const [viewing, setViewing] = useState<string | null>(null);
+
+  // Voice typing into the question box. Reads the box through a ref: dictation results
+  // arrive between renders.
+  const inputRef = useRef(input);
+  inputRef.current = input;
+  const dictation = useDictation({ getText: () => inputRef.current, setText: setInput });
+  // Typing while dictating means the user is taking over: keep their text, stop listening.
+  const onChangeInput = (text: string) => {
+    dictation.userEdited(text);
+    setInput(text);
+  };
 
   // The list is INVERTED — newest first, drawn bottom-up — which is how chat apps keep
   // the latest message pinned to the bottom. Scroll offset 0 is the newest message, so
@@ -149,17 +247,66 @@ export function OwlChatScreen() {
     setShowJump(false);
   }, [owlMessages.length]);
 
-  const renderItem: ListRenderItem<OwlMessage> = useCallback(({ item }) => <OwlRow item={item} width={width} />, [width]);
+  const openImage = useCallback((uri: string) => setViewing(uri), []);
+  const renderItem: ListRenderItem<OwlMessage> = useCallback(
+    ({ item }) => <OwlRow item={item} width={width} onOpenImage={openImage} />,
+    [width, openImage],
+  );
+
+  const addImages = async (source: OwlImageSource) => {
+    const room = OWL_MAX_IMAGES_PER_MESSAGE - pending.length;
+    if (room <= 0 || preparing) return;
+    setPreparing(true);
+    try {
+      const { images, failed, tooLarge } = await pickOwlImages(source, room);
+      if (images.length) setPending((prev) => [...prev, ...images].slice(0, OWL_MAX_IMAGES_PER_MESSAGE));
+      if (tooLarge) {
+        Alert.alert(
+          tooLarge === 1 ? 'That photo is too large' : tooLarge + ' photos are too large',
+          'Photos over 60 megapixels can’t be opened on the phone. Take the photo in the camera’s normal mode, or send a screenshot of it.',
+        );
+      } else if (failed) {
+        Alert.alert(
+          failed === 1 ? "Couldn't open an image" : "Couldn't open " + failed + ' images',
+          'This phone could not read ' + (failed === 1 ? 'that picture' : 'those pictures') + '. Photos, screenshots and JPEG, PNG, HEIC, WebP or GIF files work.',
+        );
+      }
+    } catch (e) {
+      Alert.alert("Couldn't add an image", errorText(e));
+    } finally {
+      setPreparing(false);
+    }
+  };
+
+  const onAttach = () => {
+    if (pending.length >= OWL_MAX_IMAGES_PER_MESSAGE) {
+      Alert.alert('Image limit', 'You can send up to ' + OWL_MAX_IMAGES_PER_MESSAGE + ' images with one question.');
+      return;
+    }
+    Alert.alert('Add an image', 'Show The Owl a photo, a screenshot or any picture.', [
+      { text: 'Take photo', onPress: () => void addImages('camera') },
+      { text: 'Choose from library', onPress: () => void addImages('library') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const removePending = useCallback((item: PendingOwlImage) => {
+    setPending((prev) => prev.filter((p) => p !== item));
+    discardOwlImage(item);
+  }, []);
 
   const onSend = async () => {
     const q = input.trim();
-    if (!q || owlBusy) return;
+    if ((!q && !pending.length) || owlBusy || preparing) return;
     // Without a key ask() refuses — keep what was typed instead of silently eating it.
     if (!activeApiKey(settings)) {
       Alert.alert('Add an API key first', 'Paste your ' + AI_PROVIDER_META[settings.provider].label + ' key in Settings.');
       return;
     }
+    if (dictation.listening) dictation.cancel(); // the question goes as it reads now
+    const images = pending;
     setInput('');
+    setPending([]);
     // Asking is a request to see the answer. Always reset the follow state — including a
     // fling still coasting from before the tap, whose end must not switch following off —
     // and go to the newest message if not already exactly there.
@@ -168,7 +315,7 @@ export function OwlChatScreen() {
     flinging.current = false;
     setShowJump(false);
     if (offset.current > 0) jumpToLatest();
-    await ask(q);
+    await ask(q, images);
   };
 
   const onClear = () => {
@@ -262,10 +409,41 @@ export function OwlChatScreen() {
           </View>
 
           <Text style={styles.status} numberOfLines={2}>
-            {status || ' '}
+            {dictation.listening ? 'Listening… tap the red button when you’re done.' : status || ' '}
           </Text>
+          <View style={styles.composer}>
+          {pending.length || preparing ? (
+            <ScrollView horizontal style={styles.pendingRow} contentContainerStyle={styles.pendingRowContent} keyboardShouldPersistTaps="handled">
+              {pending.map((p) => (
+                <PendingThumb key={p.image.id} item={p} onRemove={removePending} />
+              ))}
+              {preparing ? (
+                <View style={[styles.pending, styles.pendingBusy]}>
+                  <ActivityIndicator color={theme.primary} />
+                </View>
+              ) : null}
+            </ScrollView>
+          ) : null}
           <View style={styles.inputRow}>
-            <TextInput style={styles.input} placeholder="Ask The Owl…" placeholderTextColor={theme.faint} value={input} onChangeText={setInput} multiline />
+            <Pressable
+              style={[styles.iconBtn, (preparing || pending.length >= OWL_MAX_IMAGES_PER_MESSAGE) && styles.iconBtnOff]}
+              onPress={onAttach}
+              disabled={preparing}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel="Add an image"
+            >
+              <Image source={ADD_IMAGE} style={styles.iconBtnIcon} />
+            </Pressable>
+            <TextInput
+              style={styles.input}
+              placeholder={pending.length ? 'Ask about the image… (optional)' : 'Ask The Owl…'}
+              placeholderTextColor={theme.faint}
+              value={input}
+              onChangeText={onChangeInput}
+              multiline
+            />
+            <MicButton dictation={dictation} />
             {owlBusy ? (
               // While a reply is coming, the button stops it — the way out of a reply that
               // is taking too long, streamed or not.
@@ -273,11 +451,20 @@ export function OwlChatScreen() {
                 <Text style={styles.stopText}>Stop</Text>
               </Pressable>
             ) : (
-              <Pressable style={styles.sendBtn} onPress={() => void onSend()}>
+              <Pressable style={[styles.sendBtn, preparing && styles.sendBtnOff]} onPress={() => void onSend()} disabled={preparing}>
                 <Text style={styles.sendText}>Ask</Text>
               </Pressable>
             )}
           </View>
+          </View>
+          <Modal visible={!!viewing} transparent animationType="fade" onRequestClose={() => setViewing(null)}>
+            <Pressable style={styles.viewer} onPress={() => setViewing(null)} accessibilityLabel="Close image">
+              {viewing ? <Image source={{ uri: viewing }} style={styles.viewerImage} resizeMode="contain" /> : null}
+              <View style={styles.viewerClose}>
+                <Image source={CLOSE} style={styles.viewerCloseIcon} />
+              </View>
+            </Pressable>
+          </Modal>
         </KeyboardAvoidingView>
       </RenderHTMLConfigProvider>
     </TRenderEngineProvider>
@@ -327,20 +514,64 @@ const styles = StyleSheet.create({
   assistant: { alignSelf: 'flex-start', backgroundColor: theme.surface },
   meta: { fontSize: 11, color: theme.faint, marginBottom: 4, fontWeight: '600' },
   userText: { fontSize: 15, color: theme.text },
+  userTextAfterImages: { marginTop: 8 },
+  image: { borderRadius: 10, backgroundColor: theme.surfaceMuted },
+  imageGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  imageMissing: {
+    borderRadius: 10,
+    backgroundColor: theme.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  imageMissingIcon: { width: 24, height: 24, tintColor: theme.faint },
+  imageMissingText: { fontSize: 11, color: theme.faint, fontWeight: '600' },
+  pendingRow: { flexGrow: 0 },
+  pendingRowContent: { gap: 8, paddingHorizontal: 12, paddingTop: 8 },
+  pending: { width: 64, height: 64, borderRadius: 10, overflow: 'hidden', backgroundColor: theme.surfaceMuted },
+  pendingBusy: { alignItems: 'center', justifyContent: 'center' },
+  pendingImage: { width: 64, height: 64 },
+  pendingRemove: {
+    position: 'absolute',
+    top: 3,
+    right: 3,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pendingRemoveIcon: { width: 14, height: 14, tintColor: '#fff' },
+  iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.surfaceMuted },
+  iconBtnOff: { opacity: 0.4 },
+  iconBtnIcon: { width: 22, height: 22, tintColor: theme.primary },
+  viewer: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.92)', alignItems: 'center', justifyContent: 'center' },
+  viewerImage: { width: '100%', height: '85%' },
+  viewerClose: {
+    position: 'absolute',
+    top: 48,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerCloseIcon: { width: 24, height: 24, tintColor: '#fff' },
   empty: { textAlign: 'center', color: theme.faint, marginTop: 40, paddingHorizontal: 24, lineHeight: 21 },
   // Always rendered (at least one line): a status line popping in and out would resize
   // the list from below and nudge the whole conversation each time. Up to two lines, so
   // a warning (e.g. the chat couldn't be saved) isn't clipped away.
   status: { paddingHorizontal: 12, paddingBottom: 4, color: theme.muted, fontSize: 12 },
   emptyWrap: { flex: 1 },
+  composer: { borderTopWidth: 1, borderTopColor: theme.border, backgroundColor: theme.surface },
   inputRow: {
     flexDirection: 'row',
     gap: 8,
     padding: 10,
-    borderTopWidth: 1,
-    borderTopColor: theme.border,
     alignItems: 'flex-end',
-    backgroundColor: theme.surface,
   },
   input: {
     flex: 1,
@@ -352,7 +583,8 @@ const styles = StyleSheet.create({
     maxHeight: 120,
     color: theme.text,
   },
-  sendBtn: { backgroundColor: theme.primary, borderRadius: theme.radiusSm, paddingHorizontal: 20, paddingVertical: 12 },
+  sendBtn: { backgroundColor: theme.primary, borderRadius: theme.radiusSm, paddingHorizontal: 18, paddingVertical: 12 },
+  sendBtnOff: { opacity: 0.5 },
   sendText: { color: theme.onPrimary, fontWeight: '800' },
   stopBtn: { backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.danger },
   stopText: { color: theme.danger, fontWeight: '800' },
