@@ -42,8 +42,14 @@ export interface Dictation {
   listening: boolean;
   /** Start listening, or stop (keeping what was heard). */
   toggle: () => void;
-  /** Stop at once and drop anything not yet written — e.g. the user started typing. */
+  /** Stop at once and drop anything not yet written — e.g. the question is being sent. */
   cancel: () => void;
+  /**
+   * The box's onChangeText: call it with each change. A change that is just the text
+   * dictation wrote (some keyboards echo it back) is ignored; anything else means the
+   * user is typing, which takes over from dictation.
+   */
+  userEdited: (text: string) => void;
 }
 
 export function useDictation(field: DictationField): Dictation {
@@ -54,12 +60,21 @@ export function useDictation(field: DictationField): Dictation {
   // session it replaced).
   const session = useRef<{ base: string; heard: DictationState; started: boolean } | null>(null);
   const stopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A start is in progress (permission prompt…): further taps wait for it.
+  const starting = useRef(false);
+  // The text dictation last put in the box, to tell a keyboard's echo from typing.
+  const lastWritten = useRef<string | null>(null);
   const fieldRef = useRef(field);
   useEffect(() => {
     fieldRef.current = field;
   });
 
   const mine = useCallback(() => owner?.token === token, [token]);
+
+  const write = useCallback((text: string) => {
+    lastWritten.current = text;
+    fieldRef.current.setText(text);
+  }, []);
 
   // End the session: keep everything heard (the words still being heard included).
   const finish = useCallback(() => {
@@ -69,8 +84,8 @@ export function useDictation(field: DictationField): Dictation {
     session.current = null;
     if (owner?.token === token) owner = null;
     setListening(false);
-    if (s) fieldRef.current.setText(joinDictation(s.base, settleDictation(s.heard)));
-  }, [token]);
+    if (s) write(joinDictation(s.base, settleDictation(s.heard)));
+  }, [token, write]);
 
   const cancel = useCallback(() => {
     if (stopTimer.current) clearTimeout(stopTimer.current);
@@ -89,7 +104,7 @@ export function useDictation(field: DictationField): Dictation {
     const s = session.current;
     if (!mine() || !s) return;
     s.heard = applyDictationResult(s.heard, event.results[0]?.transcript ?? '', event.isFinal);
-    fieldRef.current.setText(joinDictation(s.base, s.heard));
+    write(joinDictation(s.base, s.heard));
   });
   useSpeechRecognitionEvent('end', () => {
     if (mine() && session.current?.started) finish();
@@ -103,13 +118,18 @@ export function useDictation(field: DictationField): Dictation {
   });
 
   const start = useCallback(async () => {
-    if (!ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
-      Alert.alert('Voice typing', dictationErrorMessage('service-not-allowed') || '');
-      return;
-    }
-    const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Voice typing', dictationErrorMessage('not-allowed') || '');
+    try {
+      if (!ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
+        Alert.alert('Voice typing', dictationErrorMessage('service-not-allowed') || '');
+        return;
+      }
+      const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Voice typing', dictationErrorMessage('not-allowed') || '');
+        return;
+      }
+    } catch (e) {
+      Alert.alert('Voice typing', String((e as Error)?.message || e) || (dictationErrorMessage('unknown') ?? ''));
       return;
     }
     if (owner && owner.token !== token) {
@@ -126,6 +146,7 @@ export function useDictation(field: DictationField): Dictation {
       },
     };
     session.current = { base: fieldRef.current.getText(), heard: EMPTY_DICTATION, started: false };
+    lastWritten.current = null;
     setListening(true);
     try {
       ExpoSpeechRecognitionModule.start({
@@ -142,8 +163,12 @@ export function useDictation(field: DictationField): Dictation {
   }, [token, finish]);
 
   const toggle = useCallback(() => {
+    if (starting.current) return; // still asking for the microphone: one start at a time
     if (!listening) {
-      void start();
+      starting.current = true;
+      void start().finally(() => {
+        starting.current = false;
+      });
       return;
     }
     // Stop listening; the recognizer delivers the last words, then ends. Don't hang on it.
@@ -158,10 +183,17 @@ export function useDictation(field: DictationField): Dictation {
     }, STOP_GRACE_MS);
   }, [listening, start, finish, mine]);
 
+  const userEdited = useCallback(
+    (text: string) => {
+      if (session.current && text !== lastWritten.current) cancel();
+    },
+    [cancel],
+  );
+
   // Leaving the screen stops listening (the other tab's box may want the microphone).
   useFocusEffect(useCallback(() => cancel, [cancel]));
 
-  return { listening, toggle, cancel };
+  return { listening, toggle, cancel, userEdited };
 }
 
 const MIC = require('../assets/owl/mic.png');

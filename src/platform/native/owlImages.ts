@@ -18,6 +18,12 @@ import type { AiImageMediaType } from '../../core/ai';
 
 /** Longest side, in pixels, of an image sent to The Owl. */
 export const OWL_IMAGE_MAX_EDGE = 1568;
+/**
+ * The largest picture (in pixels) the phone will try to open. Converting decodes the
+ * whole picture first — a 108 or 200 MP photo would need 0.4–0.8 GB of memory, enough
+ * to crash the app — so those are turned away instead.
+ */
+const MAX_SOURCE_PIXELS = 60_000_000;
 const JPEG_QUALITY = 0.85;
 /**
  * A PNG bigger than this (base64 characters) goes as JPEG instead — a photo saved as PNG
@@ -100,11 +106,15 @@ async function prepareOwlImage(uri: string, transparent: boolean): Promise<Pendi
 
 /**
  * Let the user choose images (or take a photo) and convert them for The Owl. Resolves
- * with what could be converted and how many couldn't; nothing when they cancel. Throws,
- * with a message fit to show, when camera access is refused.
+ * with what could be converted, how many couldn't be read, and how many were too large
+ * to open; nothing when they cancel. Throws, with a message fit to show, when camera
+ * access is refused.
  */
-export async function pickOwlImages(source: OwlImageSource, limit: number): Promise<{ images: PendingOwlImage[]; failed: number }> {
-  if (limit <= 0) return { images: [], failed: 0 };
+export async function pickOwlImages(
+  source: OwlImageSource,
+  limit: number,
+): Promise<{ images: PendingOwlImage[]; failed: number; tooLarge: number }> {
+  if (limit <= 0) return { images: [], failed: 0, tooLarge: 0 };
   let result: ImagePicker.ImagePickerResult;
   if (source === 'camera') {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
@@ -121,18 +131,23 @@ export async function pickOwlImages(source: OwlImageSource, limit: number): Prom
       quality: 1,
     });
   }
-  if (result.canceled || !result.assets?.length) return { images: [], failed: 0 };
+  if (result.canceled || !result.assets?.length) return { images: [], failed: 0, tooLarge: 0 };
 
   const images: PendingOwlImage[] = [];
   let failed = 0;
+  let tooLarge = 0;
   for (const asset of result.assets.slice(0, limit)) {
+    if (asset.width > 0 && asset.height > 0 && asset.width * asset.height > MAX_SOURCE_PIXELS) {
+      tooLarge += 1;
+      continue;
+    }
     try {
       images.push(await prepareOwlImage(asset.uri, mayBeTransparent(asset.mimeType, asset.fileName)));
     } catch {
       failed += 1;
     }
   }
-  return { images, failed };
+  return { images, failed, tooLarge };
 }
 
 /** Keep a sent image for good: move it from the cache into the chat's image folder. */

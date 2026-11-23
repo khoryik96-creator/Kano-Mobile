@@ -642,11 +642,23 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
       }
       setOwlBusy(true);
 
+      // Stoppable, and never endless: RN's networking has no timeouts of its own, so a
+      // stalled request would otherwise leave the Owl "thinking" until the app is killed.
+      // Set up first: the Stop button shows from here on, and a tap must count even while
+      // the images are still being filed (sendOwlMessage then sends nothing).
+      const run: { controller: AbortController; reason?: string } = { controller: new AbortController() };
+      owlRun.current = run;
+      const ceiling = setTimeout(() => {
+        run.reason = OWL_TIMEOUT_MESSAGE;
+        run.controller.abort();
+      }, OWL_REPLY_TIMEOUT_MS);
+
       // The pictures now belong to the chat: move them out of the cache before the bubble
       // that shows them appears. Until the message is in the transcript they're marked
       // in flight, so a tidy-up running meanwhile leaves them alone.
       for (const p of attached) owlImagesInFlight.current.add(p.image.id);
-      await Promise.all(attached.map((p) => keepOwlImage(p).catch(() => undefined)));
+      const filed = await Promise.all(attached.map((p) => keepOwlImage(p).then(() => true, () => false)));
+      const imageNotKept = filed.includes(false);
 
       // Snapshot the conversation identity: if the user clears the chat while the
       // provider is thinking, this reply belongs to a conversation that no longer
@@ -683,15 +695,6 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
           if (gen === owlGen.current) setOwlDraft(latest);
         }, OWL_DRAFT_FLUSH_MS);
       };
-
-      // Stoppable, and never endless: RN's networking has no timeouts of its own, so a
-      // stalled request would otherwise leave the Owl "thinking" until the app is killed.
-      const run: { controller: AbortController; reason?: string } = { controller: new AbortController() };
-      owlRun.current = run;
-      const ceiling = setTimeout(() => {
-        run.reason = OWL_TIMEOUT_MESSAGE;
-        run.controller.abort();
-      }, OWL_REPLY_TIMEOUT_MS);
 
       let result;
       try {
@@ -743,9 +746,13 @@ export function KanoProvider({ children }: { children: React.ReactNode }) {
       const outcome = result.ok
         ? 'The Owl replied' + (result.cost ? ' · $' + result.cost.toFixed(6) : '')
         : result.error || '';
-      // The save warning goes FIRST: the status line can clip, and this is the part that
-      // tells you the conversation won't survive a restart.
-      setStatus(saved || !owlLoaded.current ? outcome : "Couldn't save this chat on the phone · " + outcome);
+      // Save warnings go FIRST: the status line can clip, and they are the part that tells
+      // you something won't survive a restart.
+      setStatus(
+        (saved || !owlLoaded.current ? '' : "Couldn't save this chat on the phone · ") +
+          (imageNotKept ? "Couldn't keep the image on this phone · " : '') +
+          outcome,
+      );
       scheduleOwlSync();
     },
     [persistOwl, scheduleOwlSync, pruneImages],

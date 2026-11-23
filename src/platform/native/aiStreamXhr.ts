@@ -72,6 +72,9 @@ export const xhrStreamTransport: AiStreamTransport = (req, sink, signal) =>
       sendHeaders();
       drain();
     };
+    // Sending counts as activity too: a question with images can take a while to upload
+    // on a slow connection, and that is not a stalled reply.
+    if (xhr.upload) xhr.upload.onprogress = () => touch();
     xhr.onload = () => {
       if (settled) return;
       sendHeaders();

@@ -192,7 +192,7 @@ export function OwlChatScreen() {
   const dictation = useDictation({ getText: () => inputRef.current, setText: setInput });
   // Typing while dictating means the user is taking over: keep their text, stop listening.
   const onChangeInput = (text: string) => {
-    if (dictation.listening) dictation.cancel();
+    dictation.userEdited(text);
     setInput(text);
   };
 
@@ -258,9 +258,14 @@ export function OwlChatScreen() {
     if (room <= 0 || preparing) return;
     setPreparing(true);
     try {
-      const { images, failed } = await pickOwlImages(source, room);
+      const { images, failed, tooLarge } = await pickOwlImages(source, room);
       if (images.length) setPending((prev) => [...prev, ...images].slice(0, OWL_MAX_IMAGES_PER_MESSAGE));
-      if (failed) {
+      if (tooLarge) {
+        Alert.alert(
+          tooLarge === 1 ? 'That photo is too large' : tooLarge + ' photos are too large',
+          'Photos over 60 megapixels can’t be opened on the phone. Take the photo in the camera’s normal mode, or send a screenshot of it.',
+        );
+      } else if (failed) {
         Alert.alert(
           failed === 1 ? "Couldn't open an image" : "Couldn't open " + failed + ' images',
           'This phone could not read ' + (failed === 1 ? 'that picture' : 'those pictures') + '. Photos, screenshots and JPEG, PNG, HEIC, WebP or GIF files work.',

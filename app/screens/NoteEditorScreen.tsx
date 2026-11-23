@@ -50,7 +50,7 @@ export function NoteEditorScreen() {
   textRef.current = text;
   const dictation = useDictation({ getText: () => textRef.current, setText });
   const onChangeText = (value: string) => {
-    if (dictation.listening) dictation.cancel();
+    dictation.userEdited(value);
     setText(value);
   };
 
@@ -152,6 +152,7 @@ export function NoteEditorScreen() {
   // Archiving used to ignore whatever had been typed. Now it saves the edits too.
   const onArchive = async () => {
     if (!live || working) return;
+    if (dictation.listening) dictation.cancel(); // archive the text as it reads now
     setWorking(true);
     try {
       if (dirty && !((await confirmSave()) && (await persist()))) return;
@@ -166,6 +167,7 @@ export function NoteEditorScreen() {
 
   const onDelete = () => {
     if (!id || working) return;
+    if (dictation.listening) dictation.cancel();
     Alert.alert('Delete note?', 'This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
       {
