@@ -1,4 +1,4 @@
-import type { AiProvider, AiTextResult } from './types';
+import type { AiProvider, AiTextResult, AiImage } from './types';
 import {
   CLAUDE_MODEL,
   DEEPSEEK_MODEL,
@@ -10,6 +10,7 @@ import {
 } from './providers';
 import { estimateUsage } from './usage';
 import type { RawUsage } from './usage';
+import { claudeUserContent, deepSeekUserContent } from './content';
 
 // Streaming provider replies — a faithful lift of modules/kano_ai_stream.js
 // (kanoReadAiStream + kanoCallAiStreaming). The extension reads a fetch body stream in a
@@ -40,6 +41,8 @@ export interface AiStreamCallOptions {
   userText: string;
   maxTokens?: number;
   model?: string;
+  /** Images to show the model along with `userText`. */
+  images?: AiImage[];
 }
 
 /**
@@ -79,7 +82,7 @@ export function buildStreamingRequest(opts: AiStreamCallOptions): AiStreamReques
         stream_options: { include_usage: true },
         messages: [
           { role: 'system', content: opts.system },
-          { role: 'user', content: opts.userText },
+          { role: 'user', content: deepSeekUserContent(opts.userText, opts.images) },
         ],
       }),
     };
@@ -93,7 +96,7 @@ export function buildStreamingRequest(opts: AiStreamCallOptions): AiStreamReques
       max_tokens: maxTokens,
       stream: true,
       system: opts.system,
-      messages: [{ role: 'user', content: opts.userText }],
+      messages: [{ role: 'user', content: claudeUserContent(opts.userText, opts.images) }],
     }),
   };
 }

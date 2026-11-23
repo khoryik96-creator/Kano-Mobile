@@ -1,4 +1,4 @@
-import type { AiFetch, AiCallOptions, AiTextResult, AiJsonResult } from './types';
+import type { AiFetch, AiCallOptions, AiTextResult, AiJsonResult, AiImage } from './types';
 import {
   CLAUDE_MODEL,
   DEEPSEEK_MODEL,
@@ -10,6 +10,7 @@ import {
 } from './providers';
 import { estimateUsage } from './usage';
 import { parseJsonFromText } from './json';
+import { claudeUserContent, deepSeekUserContent } from './content';
 
 // Direct provider client — faithful lift of background.js callClaude*/callDeepSeek*,
 // with the transport injected. The extension runs these from a service worker (no
@@ -42,7 +43,9 @@ export async function callClaudeText(
   maxTokens = 1800,
   signal?: unknown,
   model: string = CLAUDE_MODEL,
+  images?: AiImage[],
 ): Promise<AiTextResult> {
+  const content = claudeUserContent(userText, images);
   const res = await fetchImpl(ANTHROPIC_URL, {
     method: 'POST',
     headers: {
@@ -52,7 +55,7 @@ export async function callClaudeText(
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     signal,
-    body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: userText }] }),
+    body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: 'user', content }] }),
   });
   const data = await readJson(res, AI_ERROR_LABEL.claude);
   return {
@@ -103,7 +106,9 @@ export async function callDeepSeekText(
   maxTokens = 1800,
   signal?: unknown,
   model: string = DEEPSEEK_MODEL,
+  images?: AiImage[],
 ): Promise<AiTextResult> {
+  const content = deepSeekUserContent(userText, images);
   const res = await fetchImpl(DEEPSEEK_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
@@ -115,7 +120,7 @@ export async function callDeepSeekText(
       stream: false,
       messages: [
         { role: 'system', content: system },
-        { role: 'user', content: userText },
+        { role: 'user', content },
       ],
     }),
   });
@@ -168,10 +173,10 @@ export async function callDeepSeekJson(
 /** Text (chat) call routed by provider. This is what the Owl chat uses. */
 export function callAiText(fetchImpl: AiFetch, opts: AiCallOptions): Promise<AiTextResult> {
   const provider = normalizeProvider(opts.provider);
-  const { apiKey, system, userText, maxTokens = 1800, signal, model } = opts;
+  const { apiKey, system, userText, maxTokens = 1800, signal, model, images } = opts;
   return provider === 'deepseek'
-    ? callDeepSeekText(fetchImpl, apiKey, system, userText, maxTokens, signal, model || DEEPSEEK_MODEL)
-    : callClaudeText(fetchImpl, apiKey, system, userText, maxTokens, signal, model || CLAUDE_MODEL);
+    ? callDeepSeekText(fetchImpl, apiKey, system, userText, maxTokens, signal, model || DEEPSEEK_MODEL, images)
+    : callClaudeText(fetchImpl, apiKey, system, userText, maxTokens, signal, model || CLAUDE_MODEL, images);
 }
 
 /** JSON-extraction call routed by provider (Salary/CV features). */

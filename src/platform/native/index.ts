@@ -6,3 +6,5 @@
 export { KeychainSecureStore } from './secureStoreKeychain';
 export { AsyncStorageNoteStore } from './noteStoreAsyncStorage';
 export { xhrStreamTransport } from './aiStreamXhr';
+export { pickOwlImages, keepOwlImage, discardOwlImage, readOwlImage, pruneOwlImages, owlImageUri, OWL_IMAGE_MAX_EDGE } from './owlImages';
+export type { PendingOwlImage, OwlImageSource } from './owlImages';

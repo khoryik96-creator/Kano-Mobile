@@ -141,7 +141,7 @@ test('stream: the request matches the extension (model, stream flags, auth heade
   const d = buildStreamingRequest({ ...CALL, provider: 'deepseek', apiKey: 'sk-d' });
   const db = JSON.parse(d.body);
   assert.equal(d.headers.Authorization, 'Bearer sk-d');
-  assert.equal(db.model, 'deepseek-v4-flash');
+  assert.equal(db.model, 'deepseek-flash', "the current id of the model the extension's retired id is served by");
   assert.deepEqual(db.stream_options, { include_usage: true }, 'needed for the cost line');
   assert.deepEqual(db.thinking, { type: 'disabled' });
   assert.equal(db.messages[0].role, 'system');

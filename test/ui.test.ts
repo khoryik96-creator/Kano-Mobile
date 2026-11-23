@@ -20,6 +20,11 @@ import {
   serializeOwlChat,
   owlClearPrompt,
   noteHasRichFormatting,
+  applyDictationResult,
+  settleDictation,
+  joinDictation,
+  dictationErrorMessage,
+  EMPTY_DICTATION,
 } from '../src/ui';
 import { owlMessageId, makeOwlMessage } from '../src/core/owl';
 import type { NoteState } from '../src/core/notes';
@@ -486,4 +491,41 @@ test('ui/owlChat: messages are stamped by the given clock (a phone whose clock i
 test('ui/owlChat: the clear question mentions the Drive backup only when there is one', () => {
   assert.equal(owlClearPrompt(1, false), 'This permanently deletes the 1 Owl message saved on this phone. It does not affect your notes.');
   assert.match(owlClearPrompt(3, true), /^This permanently deletes the 3 Owl messages saved on this phone and in your Google Drive backup/);
+});
+
+// ── Voice typing ─────────────────────────────────────────────────────────────────
+
+
+test('ui/dictation: segments settle in order; the one being heard is replaced, never duplicated', () => {
+  let d = EMPTY_DICTATION;
+  d = applyDictationResult(d, 'find me', false);
+  d = applyDictationResult(d, 'find me a java', false);
+  assert.equal(joinDictation('', d), 'find me a java');
+  d = applyDictationResult(d, 'find me a Java developer', true);
+  d = applyDictationResult(d, ' in', false); // iOS 18 prefixes later segments with a space
+  assert.equal(joinDictation('', d), 'find me a Java developer in');
+  d = applyDictationResult(d, 'in Sydney', true);
+  assert.deepEqual(d, { committed: 'find me a Java developer in Sydney', interim: '' });
+});
+
+test('ui/dictation: dictated words follow what was already typed, with one space', () => {
+  const d = { committed: 'and Perth', interim: '' };
+  assert.equal(joinDictation('Sydney', d), 'Sydney and Perth');
+  assert.equal(joinDictation('Sydney ', d), 'Sydney and Perth');
+  assert.equal(joinDictation('Notes:\n', d), 'Notes:\nand Perth');
+  assert.equal(joinDictation('Sydney', EMPTY_DICTATION), 'Sydney', 'nothing heard: untouched');
+});
+
+test('ui/dictation: words still being heard when it stops are kept', () => {
+  const settled = settleDictation({ committed: 'hello', interim: 'there' });
+  assert.deepEqual(settled, { committed: 'hello there', interim: '' });
+  assert.deepEqual(settleDictation(EMPTY_DICTATION), EMPTY_DICTATION);
+});
+
+test('ui/dictation: only real failures get a message', () => {
+  for (const quiet of ['aborted', 'no-speech', 'speech-timeout']) assert.equal(dictationErrorMessage(quiet), null, quiet);
+  assert.match(dictationErrorMessage('not-allowed') || '', /microphone/);
+  assert.match(dictationErrorMessage('network') || '', /internet/);
+  assert.match(dictationErrorMessage('service-not-allowed') || '', /isn't available/);
+  assert.match(dictationErrorMessage('something-new') || '', /try again/);
 });

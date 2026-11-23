@@ -27,6 +27,15 @@ export type AiFetch = (url: string, init?: AiRequestInit) => Promise<AiResponse>
 /** The two supported providers. */
 export type AiProvider = 'claude' | 'deepseek';
 
+/** Image types both providers accept. */
+export type AiImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+
+/** An image sent with a question: its bytes as base64 (no `data:` prefix). */
+export interface AiImage {
+  mediaType: AiImageMediaType;
+  data: string;
+}
+
 /** Normalized token usage + estimated cost for one call. */
 export interface AiUsage {
   inputTokens: number;
@@ -63,4 +72,6 @@ export interface AiCallOptions {
   signal?: unknown;
   /** Override the provider's default model id (defaults to the extension's). */
   model?: string;
+  /** Images to show the model along with `userText` (chat calls only). */
+  images?: AiImage[];
 }

@@ -5,6 +5,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useKano } from '../state';
 import { noteToDraft, emptyDraft, IMPORTANCE_LEVELS, importanceLevel, noteHasRichFormatting } from '../../src/ui';
 import { theme } from '../theme';
+import { MicButton, useDictation } from '../dictation';
 
 type Choice = 'cancel' | 'ok';
 
@@ -42,6 +43,16 @@ export function NoteEditorScreen() {
   const [text, setText] = useState(initial.text);
   const [importance, setImportance] = useState(initialImportance);
   const [working, setWorking] = useState(false);
+
+  // Voice typing into the note's text (it reads the box through a ref: results arrive
+  // between renders). Typing yourself takes over from it.
+  const textRef = useRef(text);
+  textRef.current = text;
+  const dictation = useDictation({ getText: () => textRef.current, setText });
+  const onChangeText = (value: string) => {
+    if (dictation.listening) dictation.cancel();
+    setText(value);
+  };
 
   const dirty = title !== initial.title || text !== initial.text || importance !== initialImportance;
   const formatted = noteHasRichFormatting(opened);
@@ -128,6 +139,7 @@ export function NoteEditorScreen() {
 
   const onSave = async () => {
     if (working) return;
+    if (dictation.listening) dictation.cancel(); // save the text as it reads now
     if (!dirty) return leave(); // nothing changed: nothing to write (and no new version)
     setWorking(true);
     try {
@@ -194,10 +206,11 @@ export function NoteEditorScreen() {
           style={styles.body}
           placeholder="Write your note…"
           value={text}
-          onChangeText={setText}
+          onChangeText={onChangeText}
           multiline
           textAlignVertical="top"
         />
+        {dictation.listening ? <Text style={styles.hint}>Listening… tap the red button when you’re done.</Text> : null}
         {formatted ? (
           <Text style={styles.hint}>
             Formatted in the Kano extension. Changing the title or urgency keeps the formatting; editing the text saves it as plain text.
@@ -206,6 +219,7 @@ export function NoteEditorScreen() {
       </ScrollView>
 
       <View style={styles.actions}>
+        <MicButton dictation={dictation} disabled={working} size={46} />
         <Pressable style={[styles.btn, styles.primary, working && styles.off]} onPress={() => void onSave()} disabled={working}>
           <Text style={styles.primaryText}>Save</Text>
         </Pressable>
@@ -234,7 +248,15 @@ const styles = StyleSheet.create({
   importanceText: { fontWeight: '700', color: theme.muted, fontSize: 13 },
   importanceTextOn: { color: '#fff' },
   body: { fontSize: 16, minHeight: 240, lineHeight: 23, color: theme.text },
-  actions: { flexDirection: 'row', gap: 10, padding: 14, borderTopWidth: 1, borderTopColor: theme.border, backgroundColor: theme.surface },
+  actions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 14,
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+    backgroundColor: theme.surface,
+  },
   btn: { flexGrow: 1, alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, borderRadius: theme.radiusSm, backgroundColor: theme.surfaceMuted },
   btnText: { fontWeight: '700', color: theme.text },
   primary: { backgroundColor: theme.primary },

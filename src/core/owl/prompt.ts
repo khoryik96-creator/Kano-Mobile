@@ -23,11 +23,17 @@ export interface BuildOwlPromptOptions {
   userName?: string;
   /** Extracted current-page text, when the "read page" toggle is on. */
   pageContext?: OwlPageContext | null;
+  /**
+   * One line per image sent with this request, in the order they're sent (e.g. "sent
+   * with this question"). Leave out when no images go — the prompt is then exactly the
+   * extension's.
+   */
+  imageNotes?: string[];
 }
 
 /** Build the full Owl user prompt. Faithful lift of buildKanoOwlPrompt. */
 export function buildOwlPrompt(question: string, options: BuildOwlPromptOptions = {}): string {
-  const { messages = [], userName, pageContext = null } = options;
+  const { messages = [], userName, pageContext = null, imageNotes = [] } = options;
   const recent = owlRecentChatForPrompt(messages, userName);
   const displayName = normalizeOwlUserName(userName);
   const nameInstruction = displayName
@@ -40,13 +46,16 @@ export function buildOwlPrompt(question: string, options: BuildOwlPromptOptions 
   const pageBlock = pageText
     ? `\n\nCurrent page:\nURL: ${pageContext?.url || ''}\nTitle: ${pageContext?.title || ''}\n-----\n${pageText}\n-----`
     : '';
+  const imageBlock = imageNotes.length
+    ? '\n\nImages attached above, in order:\n' + imageNotes.map((note, i) => `${i + 1}. ${note}`).join('\n')
+    : '';
   return `You are The Owl, an AI chat assistant inside Kano for JobAdder. The user is a recruiter using Kano for candidate review, CV scanning, salary notes, sourcing, and JobAdder field updates.
 ${nameInstruction}
 
 Answer practically and concisely. Format for a small floating panel: use compact headings and bullets, avoid excessive blank lines, and do not start with 'Short answer:'. For comparisons, prefer clean bullet sections; only use a markdown table if it is a valid compact table with no blank lines between rows. ${browseLine}
 
 Recent chat:
-${recent || 'None'}${pageBlock}
+${recent || 'None'}${pageBlock}${imageBlock}
 
 User question:
 ${question}`;

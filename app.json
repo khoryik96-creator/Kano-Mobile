@@ -20,6 +20,21 @@
       }
     },
     "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Kano opens your photos when you choose a picture to show The Owl.",
+          "cameraPermission": "Kano uses the camera when you take a photo to show The Owl.",
+          "microphonePermission": "Kano uses the microphone for voice typing."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Kano uses the microphone for voice typing.",
+          "speechRecognitionPermission": "Kano turns what you say into text when you use voice typing."
+        }
+      ],
       "./plugins/withKotlinVersion"
     ]
   }

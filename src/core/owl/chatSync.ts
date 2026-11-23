@@ -1,6 +1,8 @@
-import type { OwlMessage, OwlRole } from './chat';
-import { OWL_MAX_VISIBLE_MESSAGES } from './chat';
+import type { OwlImage, OwlMessage, OwlRole } from './chat';
+import { OWL_MAX_VISIBLE_MESSAGES, OWL_MAX_IMAGES_PER_MESSAGE, isOwlImageId } from './chat';
 import { fnv1a36 } from '../hash';
+import { AI_IMAGE_MEDIA_TYPES } from '../ai';
+import type { AiImageMediaType } from '../ai';
 
 // The Owl transcript as synced through Google Drive (mobile-only — the extension keeps
 // its Owl chat in browser storage and never reads this file). Pure, Node-tested logic:
@@ -76,9 +78,30 @@ function laterInstant(a: string, b: string): string {
 }
 
 /**
+ * Validate untrusted image records: an id the app mints (ids name files), a type both
+ * providers read, and sane dimensions. At most OWL_MAX_IMAGES_PER_MESSAGE.
+ */
+export function sanitizeOwlImages(list: unknown): OwlImage[] {
+  if (!Array.isArray(list)) return [];
+  const out: OwlImage[] = [];
+  for (const x of list as unknown[]) {
+    if (out.length >= OWL_MAX_IMAGES_PER_MESSAGE) break;
+    if (!x || typeof x !== 'object') continue;
+    const r = x as Record<string, unknown>;
+    const { id, mediaType, width, height } = r;
+    if (!isOwlImageId(id) || !AI_IMAGE_MEDIA_TYPES.includes(mediaType as AiImageMediaType)) continue;
+    if (typeof width !== 'number' || typeof height !== 'number') continue;
+    if (!(width > 0 && width <= 100_000 && height > 0 && height <= 100_000)) continue;
+    if (out.some((img) => img.id === id)) continue;
+    out.push({ id, mediaType: mediaType as AiImageMediaType, width: Math.round(width), height: Math.round(height) });
+  }
+  return out;
+}
+
+/**
  * Validate an untrusted list of messages (local storage or the Drive file): keep only
  * well-formed user/assistant turns, copying typeof-checked fields — never coercing, as
- * Number()/String() on a hostile object can throw.
+ * Number()/String() on a hostile object can throw. A message needs text, or images.
  */
 export function sanitizeOwlMessages(list: unknown): OwlMessage[] {
   if (!Array.isArray(list)) return [];
@@ -88,12 +111,14 @@ export function sanitizeOwlMessages(list: unknown): OwlMessage[] {
     const r = m as Record<string, unknown>;
     const role = r.role;
     const text = r.text;
-    if ((role !== 'user' && role !== 'assistant') || typeof text !== 'string' || !text.trim()) continue;
+    const images = role === 'user' ? sanitizeOwlImages(r.images) : [];
+    if ((role !== 'user' && role !== 'assistant') || typeof text !== 'string' || (!text.trim() && !images.length)) continue;
     const msg: OwlMessage = { role: role as OwlRole, text };
     if (typeof r.id === 'string' && r.id) msg.id = r.id;
     if (typeof r.cost === 'number' && Number.isFinite(r.cost) && r.cost > 0) msg.cost = r.cost;
     if (typeof r.ts === 'string') msg.ts = r.ts;
     if (r.local === true) msg.local = true;
+    if (images.length) msg.images = images;
     out.push(msg);
   }
   return out;

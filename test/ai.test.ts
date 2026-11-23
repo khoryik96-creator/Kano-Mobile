@@ -13,8 +13,9 @@ import {
   parseJsonFromText,
   normalizeProvider,
   AI_PROVIDER_META,
+  buildStreamingRequest,
 } from '../src/core/ai';
-import type { AiFetch } from '../src/core/ai';
+import type { AiFetch, AiImage } from '../src/core/ai';
 
 // Offline test for core/ai. No live-generated fixture exists — a real provider call
 // needs the user's own API key (the on-device half of Phase 3). So a fake fetch
@@ -82,7 +83,7 @@ test('ai: callDeepSeekText builds the DeepSeek request and parses choices', asyn
 
   assert.equal(cap.url, 'https://api.deepseek.com/chat/completions');
   assert.equal(cap.headers?.['Authorization'], 'Bearer sk-deep');
-  assert.equal(cap.body.model, 'deepseek-v4-flash');
+  assert.equal(cap.body.model, 'deepseek-flash');
   assert.deepEqual(cap.body.messages, [
     { role: 'system', content: 'SYS' },
     { role: 'user', content: 'Q' },
@@ -148,5 +149,78 @@ test('ai: JSON extraction + provider metadata helpers', () => {
   assert.equal(normalizeProvider('deepseek'), 'deepseek');
   assert.equal(normalizeProvider('anything else'), 'claude');
   assert.equal(AI_PROVIDER_META.claude.label, 'Claude');
-  assert.equal(AI_PROVIDER_META.deepseek.defaultModel, 'deepseek-v4-flash');
+  assert.equal(AI_PROVIDER_META.deepseek.defaultModel, 'deepseek-flash');
+});
+
+// ── Images ────────────────────────────────────────────────────────────────────────
+
+const JPEG: AiImage = { mediaType: 'image/jpeg', data: '/9j/AAAA' };
+const PNG: AiImage = { mediaType: 'image/png', data: 'iVBORw0KGgo' };
+const CLAUDE_OK = { content: [{ type: 'text', text: 'A cat.' }], usage: { input_tokens: 1600, output_tokens: 5 } };
+const DEEPSEEK_OK = { choices: [{ message: { content: 'A cat.' } }], usage: { prompt_tokens: 1100, completion_tokens: 5 } };
+
+test('ai: Claude gets base64 image blocks first, then the text (the order Claude recommends)', async () => {
+  const cap: Capture = {};
+  await callAiText(fake(200, CLAUDE_OK, cap), { provider: 'claude', apiKey: 'k', system: 'SYS', userText: 'What is this?', images: [JPEG, PNG] });
+  assert.deepEqual(cap.body.messages, [
+    {
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: '/9j/AAAA' } },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo' } },
+        { type: 'text', text: 'What is this?' },
+      ],
+    },
+  ]);
+  assert.equal(cap.body.system, 'SYS', 'the system prompt is unchanged');
+});
+
+test('ai: DeepSeek gets image_url parts holding data URLs, then the text', async () => {
+  const cap: Capture = {};
+  await callAiText(fake(200, DEEPSEEK_OK, cap), { provider: 'deepseek', apiKey: 'k', system: 'SYS', userText: 'What is this?', images: [PNG] });
+  assert.equal(cap.body.model, 'deepseek-flash', 'the DeepSeek model that reads images');
+  assert.deepEqual(cap.body.messages, [
+    { role: 'system', content: 'SYS' },
+    {
+      role: 'user',
+      content: [
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo' } },
+        { type: 'text', text: 'What is this?' },
+      ],
+    },
+  ]);
+});
+
+test('ai: no images means the exact text-only request as before', async () => {
+  const cap: Capture = {};
+  await callAiText(fake(200, CLAUDE_OK, cap), { provider: 'claude', apiKey: 'k', system: 'S', userText: 'Q', images: [] });
+  assert.deepEqual(cap.body.messages, [{ role: 'user', content: 'Q' }]);
+  const dcap: Capture = {};
+  await callAiText(fake(200, DEEPSEEK_OK, dcap), { provider: 'deepseek', apiKey: 'k', system: 'S', userText: 'Q' });
+  assert.deepEqual(dcap.body.messages[1], { role: 'user', content: 'Q' });
+});
+
+test('ai: streamed requests carry the images the same way', () => {
+  const c = JSON.parse(buildStreamingRequest({ provider: 'claude', apiKey: 'k', system: 'S', userText: 'Q', images: [JPEG] }).body);
+  assert.deepEqual(c.messages[0].content, [
+    { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: '/9j/AAAA' } },
+    { type: 'text', text: 'Q' },
+  ]);
+  assert.equal(c.stream, true);
+  const d = JSON.parse(buildStreamingRequest({ provider: 'deepseek', apiKey: 'k', system: 'S', userText: 'Q', images: [JPEG] }).body);
+  assert.deepEqual(d.messages[1].content, [
+    { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,/9j/AAAA' } },
+    { type: 'text', text: 'Q' },
+  ]);
+});
+
+test('ai: an image type neither provider reads is refused before anything is sent', async () => {
+  let called = false;
+  const spy: AiFetch = async () => {
+    called = true;
+    return { status: 200, ok: true, text: async () => JSON.stringify(CLAUDE_OK) };
+  };
+  const heic = { mediaType: 'image/heic', data: 'AAAA' } as unknown as AiImage;
+  await assert.rejects(callAiText(spy, { provider: 'claude', apiKey: 'k', system: 'S', userText: 'Q', images: [heic] }), /JPEG, PNG, GIF and WebP/);
+  assert.equal(called, false);
 });

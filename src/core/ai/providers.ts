@@ -1,11 +1,16 @@
 import type { AiProvider } from './types';
 
 // Provider metadata + model ids — lifts of AI_PROVIDER_META (popup.js) and the model
-// ids used in background.js. Kept identical to the extension so mobile bills and
-// behaves the same way; both are overridable per call for forward-compatibility.
+// ids used in background.js, so mobile bills and behaves like the extension; both are
+// overridable per call for forward-compatibility.
 
 export const CLAUDE_MODEL = 'claude-sonnet-4-6';
-export const DEEPSEEK_MODEL = 'deepseek-v4-flash';
+/**
+ * DeepSeek's current Flash model, which also reads images. The extension still sends
+ * the retired id 'deepseek-v4-flash'; DeepSeek serves that with this same model at the
+ * same price, but documents image input only for this id.
+ */
+export const DEEPSEEK_MODEL = 'deepseek-flash';
 
 export interface ProviderMeta {
   label: string;
